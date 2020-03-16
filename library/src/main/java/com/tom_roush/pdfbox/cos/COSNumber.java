@@ -1,6 +1,10 @@
 package com.tom_roush.pdfbox.cos;
 
+import android.os.Build;
+import android.system.Int64Ref;
+
 import java.io.IOException;
+import java.math.BigInteger;
 
 /**
  * This class represents an abstract number in a PDF document.
@@ -86,8 +90,18 @@ public abstract class COSNumber extends COSBase
         		{
         			return COSInteger.get(Long.parseLong(number.substring(1)));
         		}
-        		return COSInteger.get(Long.parseLong(number));
-        	}
+
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    try{
+                        return COSInteger.get(Long.parseLong(number));
+                    }catch (Exception ee){
+                        return COSInteger.get(Long.parseUnsignedLong(number));
+                    }
+                }else{
+                    return COSInteger.get( new BigInteger(number).longValue());
+                }
+            }
         	catch( NumberFormatException e )
         	{
         		throw new IOException( "Value is not an integer: " + number, e );
