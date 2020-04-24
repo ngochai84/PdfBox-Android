@@ -1928,11 +1928,13 @@ public class COSParser extends BaseParser
             String[] headerParts = header.split("-");
             if (headerParts.length == 2)
             {
+                String[] s = headerParts[1].split(" ");
                 headerVersion = Float.parseFloat(headerParts[1]);
             }
         }
         catch (NumberFormatException exception)
         {
+            headerVersion = 1.6f;
             Log.d("PdfBox-Android", "Can't parse the header version.", exception);
         }
         if (headerVersion < 0)
