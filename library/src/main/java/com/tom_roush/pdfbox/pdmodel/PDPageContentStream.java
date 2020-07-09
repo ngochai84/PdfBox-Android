@@ -99,6 +99,10 @@ public final class PDPageContentStream implements Closeable
     // number format
     private final NumberFormat formatDecimal = NumberFormat.getNumberInstance(Locale.US);
 
+    public float pageWidth;
+
+    public float pageHeight;
+
     /**
      * Create a new PDPage content stream.
      *
@@ -165,6 +169,8 @@ public final class PDPageContentStream implements Closeable
     {
         this(document, sourcePage, appendContent ? AppendMode.APPEND : AppendMode.OVERWRITE,
             compress, resetContext);
+        this.pageHeight = sourcePage.getMediaBox().getHeight();
+        this.pageWidth = sourcePage.getMediaBox().getWidth();
     }
 
     /**
