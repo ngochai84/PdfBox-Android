@@ -72,7 +72,7 @@ final class FontMapperImpl implements FontMapper
             Arrays.asList("CourierNewPS-BoldItalicMT","CourierNew-BoldItalic",
                 "LiberationMono-BoldItalic", "NimbusMonL-BoldObli","DroidSansMono"));
         substitutes.put("Helvetica",
-            Arrays.asList("ArialMT", "Arial", "LiberationSans", "NimbusSanL-Regu","Roboto-Regular"));
+            Arrays.asList("ArialMT", "Arial Unicode", "LiberationSans", "NimbusSanL-Regu","Roboto-Regular"));
         substitutes.put("Helvetica-Bold",
             Arrays.asList("Arial-BoldMT", "Arial-Bold", "LiberationSans-Bold",
                 "NimbusSanL-Bold","Roboto-Bold"));
