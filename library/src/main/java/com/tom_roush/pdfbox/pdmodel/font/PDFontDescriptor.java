@@ -262,7 +262,7 @@ public final class PDFontDescriptor implements COSObjectable
         }
         else
         {
-            flags = flags & (0xFFFFFFFF ^ bit);
+            flags = flags & (~bit);
         }
         setFlags( flags );
     }
@@ -272,6 +272,7 @@ public final class PDFontDescriptor implements COSObjectable
      *
      * @return The cos object that matches this Java object.
      */
+    @Override
     public COSDictionary getCOSObject()
     {
         return dic;
@@ -285,10 +286,10 @@ public final class PDFontDescriptor implements COSObjectable
     public String getFontName()
     {
         String retval = null;
-        COSName name = (COSName)dic.getDictionaryObject( COSName.FONT_NAME );
-        if( name != null )
+        COSBase base = dic.getDictionaryObject(COSName.FONT_NAME);
+        if (base instanceof COSName)
         {
-            retval = name.getName();
+            retval = ((COSName) base).getName();
         }
         return retval;
     }
@@ -680,9 +681,17 @@ public final class PDFontDescriptor implements COSObjectable
     }
 
     /**
-     * This will get the missing width for the font.
+     * Returns true if the missing widths entry is present in the font descriptor.
+     */
+    public boolean hasMissingWidth()
+    {
+        return dic.containsKey(COSName.MISSING_WIDTH);
+    }
+
+    /**
+     * This will get the missing width for the font from the /MissingWidth dictionary entry.
      *
-     * @return The missing width value.
+     * @return The missing width value, or 0 if there is no such dictionary entry.
      */
     public float getMissingWidth()
     {
@@ -739,9 +748,9 @@ public final class PDFontDescriptor implements COSObjectable
     {
         PDStream retval = null;
         COSBase obj = dic.getDictionaryObject(COSName.FONT_FILE);
-        if(obj instanceof COSStream)
+        if (obj instanceof COSStream)
         {
-            retval = new PDStream( (COSStream)obj );
+            retval = new PDStream((COSStream) obj);
         }
         return retval;
     }
@@ -765,9 +774,9 @@ public final class PDFontDescriptor implements COSObjectable
     {
         PDStream retval = null;
         COSBase obj = dic.getDictionaryObject(COSName.FONT_FILE2);
-        if(obj instanceof COSStream)
+        if (obj instanceof COSStream)
         {
-            retval = new PDStream((COSStream)obj);
+            retval = new PDStream((COSStream) obj);
         }
         return retval;
     }
@@ -791,9 +800,9 @@ public final class PDFontDescriptor implements COSObjectable
     {
         PDStream retval = null;
         COSBase obj = dic.getDictionaryObject(COSName.FONT_FILE3);
-        if(obj instanceof COSStream)
+        if (obj instanceof COSStream)
         {
-            retval = new PDStream((COSStream)obj);
+            retval = new PDStream((COSStream) obj);
         }
         return retval;
     }
@@ -807,7 +816,22 @@ public final class PDFontDescriptor implements COSObjectable
     {
         dic.setItem( COSName.FONT_FILE3, stream );
     }
-    
+
+    /**
+     * Get the CIDSet stream.
+     *
+     * @return A stream containing a CIDSet.
+     */
+    public PDStream getCIDSet()
+    {
+        COSObjectable cidSet = dic.getDictionaryObject(COSName.CID_SET);
+        if (cidSet instanceof COSStream)
+        {
+            return new PDStream((COSStream) cidSet);
+        }
+        return null;
+    }
+
     /**
      * Set a stream containing a CIDSet.
      *
@@ -815,7 +839,7 @@ public final class PDFontDescriptor implements COSObjectable
      */
     public void setCIDSet( PDStream stream )
     {
-    	dic.setItem( COSName.CID_SET, stream );
+        dic.setItem( COSName.CID_SET, stream );
     }
 
     /**
@@ -825,10 +849,10 @@ public final class PDFontDescriptor implements COSObjectable
      */
     public PDPanose getPanose()
     {
-        COSDictionary style = (COSDictionary) dic.getDictionaryObject(COSName.STYLE);
+        COSDictionary style = (COSDictionary)dic.getDictionaryObject(COSName.STYLE);
         if (style != null)
         {
-            COSString panose = (COSString) style.getDictionaryObject(COSName.PANOSE);
+            COSString panose = (COSString)style.getDictionaryObject(COSName.PANOSE);
             byte[] bytes = panose.getBytes();
             return new PDPanose(bytes);
         }

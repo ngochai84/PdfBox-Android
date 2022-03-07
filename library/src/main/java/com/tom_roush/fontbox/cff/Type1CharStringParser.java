@@ -78,7 +78,14 @@ public class Type1CharStringParser
             if (b0 == CALLSUBR)
             {
                 // callsubr command
-                Integer operand=(Integer)sequence.remove(sequence.size()-1);
+                Object obj = sequence.remove(sequence.size() - 1);
+                if (!(obj instanceof Integer))
+                {
+                    Log.w("PdfBox-Android", "Parameter " + obj + " for CALLSUBR is ignored, integer expected in glyph '"
+                        + glyphName + "' of font " + fontName);
+                    continue;
+                }
+                Integer operand = (Integer) obj;
 
                 if (operand >= 0 && operand < subrs.size())
                 {
@@ -86,9 +93,20 @@ public class Type1CharStringParser
                     parse(subrBytes, subrs, sequence);
                     Object lastItem = sequence.get(sequence.size()-1);
                     if (lastItem instanceof CharStringCommand &&
-                          ((CharStringCommand)lastItem).getKey().getValue()[0] == RETURN)
+                        ((CharStringCommand)lastItem).getKey().getValue()[0] == RETURN)
                     {
                         sequence.remove(sequence.size()-1); // remove "return" command
+                    }
+                }
+                else
+                {
+                    Log.w("PdfBox-Android", "CALLSUBR is ignored, operand: " + operand
+                        + ", subrs.size(): " + subrs.size() + " in glyph '"
+                        + glyphName + "' of font " + fontName);
+                    // remove all parameters (there can be more than one)
+                    while (sequence.get(sequence.size() - 1) instanceof Integer)
+                    {
+                        sequence.remove(sequence.size() - 1);
                     }
                 }
             }
@@ -102,34 +120,32 @@ public class Type1CharStringParser
 
                 // othersubrs 0-3 have their own semantics
                 Stack<Integer> results = new Stack<Integer>();
-                if (othersubrNum == 0)
+                switch (othersubrNum)
                 {
-                    results.push(removeInteger(sequence));
-                    results.push(removeInteger(sequence));
-                    sequence.remove(sequence.size() - 1);
-                    // end flex
-                    sequence.add(0);
-                    sequence.add(new CharStringCommand(TWO_BYTE, CALLOTHERSUBR));
-                }
-                else if (othersubrNum == 1)
-                {
-                    // begin flex
-                    sequence.add(1);
-                    sequence.add(new CharStringCommand(TWO_BYTE, CALLOTHERSUBR));
-                }
-                else if (othersubrNum == 3)
-                {
-                    // allows hint replacement
-                    results.push(removeInteger(sequence));
-                }
-                else
-                {
-                    // all remaining othersubrs use this fallback mechanism
-                    for (int i = 0; i < numArgs; i++)
-                    {
-                        Integer arg = removeInteger(sequence);
-                        results.push(arg);
-                    }
+                    case 0:
+                        results.push(removeInteger(sequence));
+                        results.push(removeInteger(sequence));
+                        sequence.remove(sequence.size() - 1);
+                        // end flex
+                        sequence.add(0);
+                        sequence.add(new CharStringCommand(TWO_BYTE, CALLOTHERSUBR));
+                        break;
+                    case 1:
+                        // begin flex
+                        sequence.add(1);
+                        sequence.add(new CharStringCommand(TWO_BYTE, CALLOTHERSUBR));
+                        break;
+                    case 3:
+                        // allows hint replacement
+                        results.push(removeInteger(sequence));
+                        break;
+                    default:
+                        // all remaining othersubrs use this fallback mechanism
+                        for (int i = 0; i < numArgs; i++)
+                        {
+                            results.push(removeInteger(sequence));
+                        }
+                        break;
                 }
 
                 // pop must follow immediately
@@ -137,23 +153,22 @@ public class Type1CharStringParser
                 {
                     input.readByte(); // B0_POP
                     input.readByte(); // B1_POP
-                    Integer val = results.pop();
-                    sequence.add(val);
+                    sequence.add(results.pop());
                 }
 
                 if (results.size() > 0)
                 {
-                	Log.w("PdfBox-Android", "Value left on the PostScript stack in glyph " + glyphName + " of font " + fontName);
+                    Log.w("PdfBox-Android", "Value left on the PostScript stack in glyph " + glyphName + " of font " + fontName);
                 }
             }
             else if (b0 >= 0 && b0 <= 31)
             {
                 sequence.add(readCommand(input, b0));
-            } 
+            }
             else if (b0 >= 32 && b0 <= 255)
             {
                 sequence.add(readNumber(input, b0));
-            } 
+            }
             else
             {
                 throw new IllegalArgumentException();
@@ -164,23 +179,23 @@ public class Type1CharStringParser
 
     // this method is a workaround for the fact that Type1CharStringParser assumes that subrs and
     // othersubrs can be unrolled without executing the 'div' operator, which isn't true
-    private Integer removeInteger(List<Object> sequence) throws IOException
+    private static Integer removeInteger(List<Object> sequence) throws IOException
     {
-    	Object item = sequence.remove(sequence.size() - 1);
-    	if (item instanceof Integer)
-    	{
-    		return (Integer)item;
-    	}
-    	CharStringCommand command = (CharStringCommand)item;
+        Object item = sequence.remove(sequence.size() - 1);
+        if (item instanceof Integer)
+        {
+            return (Integer)item;
+        }
+        CharStringCommand command = (CharStringCommand) item;
 
-    	// div
-    	if (command.getKey().getValue()[0] == 12 && command.getKey().getValue()[1] == 12)
-    	{
-    		int a = (Integer)sequence.remove(sequence.size() - 1);
-    		int b = (Integer)sequence.remove(sequence.size() - 1);
-    		return b / a;
-    	}
-    	throw new IOException("Unexpected char string command: " + command.getKey());
+        // div
+        if (command.getKey().getValue()[0] == 12 && command.getKey().getValue()[1] == 12)
+        {
+            int a = (Integer) sequence.remove(sequence.size() - 1);
+            int b = (Integer) sequence.remove(sequence.size() - 1);
+            return b / a;
+        }
+        throw new IOException("Unexpected char string command: " + command.getKey());
     }
 
     private CharStringCommand readCommand(DataInput input, int b0) throws IOException
@@ -198,26 +213,21 @@ public class Type1CharStringParser
         if (b0 >= 32 && b0 <= 246)
         {
             return b0 - 139;
-        } 
+        }
         else if (b0 >= 247 && b0 <= 250)
         {
             int b1 = input.readUnsignedByte();
             return (b0 - 247) * 256 + b1 + 108;
-        } 
+        }
         else if (b0 >= 251 && b0 <= 254)
         {
             int b1 = input.readUnsignedByte();
             return -(b0 - 251) * 256 - b1 - 108;
-        } 
+        }
         else if (b0 == 255)
         {
-            int b1 = input.readUnsignedByte();
-            int b2 = input.readUnsignedByte();
-            int b3 = input.readUnsignedByte();
-            int b4 = input.readUnsignedByte();
-
-            return b1 << 24 | b2 << 16 | b3 << 8 | b4;
-        } 
+            return input.readInt();
+        }
         else
         {
             throw new IllegalArgumentException();

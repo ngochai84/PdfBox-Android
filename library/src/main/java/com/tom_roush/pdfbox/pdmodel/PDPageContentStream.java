@@ -28,6 +28,7 @@ import java.util.Stack;
 
 import com.tom_roush.harmony.awt.AWTColor;
 import com.tom_roush.harmony.awt.geom.AffineTransform;
+import com.tom_roush.pdfbox.contentstream.operator.OperatorName;
 import com.tom_roush.pdfbox.cos.COSArray;
 import com.tom_roush.pdfbox.cos.COSBase;
 import com.tom_roush.pdfbox.cos.COSName;
@@ -44,11 +45,14 @@ import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB;
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDInlineImage;
+import com.tom_roush.pdfbox.pdmodel.graphics.pattern.PDTilingPattern;
 import com.tom_roush.pdfbox.pdmodel.graphics.shading.PDShading;
 import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState;
+import com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode;
 import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
 import com.tom_roush.pdfbox.util.Charsets;
 import com.tom_roush.pdfbox.util.Matrix;
+import com.tom_roush.pdfbox.util.NumberFormatUtil;
 
 /**
  * Provides the ability to write to a page content stream.
@@ -57,29 +61,67 @@ import com.tom_roush.pdfbox.util.Matrix;
  */
 public final class PDPageContentStream implements Closeable
 {
-	// instance variables
-	private final PDDocument document;
-	private OutputStream output;
-	private PDResources resources;
-	private boolean inTextMode = false;
-	private final Stack<PDFont> fontStack = new Stack<PDFont>();
 
-	    private final Stack<PDColorSpace> nonStrokingColorSpaceStack = new Stack<PDColorSpace>();
-	    private Stack<PDColorSpace> strokingColorSpaceStack = new Stack<PDColorSpace>();
+    /**
+     * This is to choose what to do with the stream: overwrite, append or prepend.
+     */
+    public static enum AppendMode
+    {
+        /**
+         * Overwrite the existing page content streams.
+         */
+        OVERWRITE,
+        /**
+         * Append the content stream after all existing page content streams.
+         */
+        APPEND,
+        /**
+         * Insert before all other page content streams.
+         */
+        PREPEND;
 
-	// number format
-	private final NumberFormat formatDecimal = NumberFormat.getNumberInstance(Locale.US);
+        public boolean isOverwrite()
+        {
+            return this == OVERWRITE;
+        }
 
-	/**
-	 * Create a new PDPage content stream.
-	 *
-	 * @param document The document the page is part of.
-	 * @param sourcePage The page to write the contents to.
-	 * @throws IOException If there is an error writing to the page contents.
+        public boolean isPrepend()
+        {
+            return this == PREPEND;
+        }
+    }
+
+    private final PDDocument document;
+    private OutputStream output;
+    private PDResources resources;
+
+    private boolean inTextMode = false;
+    private final Stack<PDFont> fontStack = new Stack<PDFont>();
+
+    private final Stack<PDColorSpace> nonStrokingColorSpaceStack = new Stack<PDColorSpace>();
+    private final Stack<PDColorSpace> strokingColorSpaceStack = new Stack<PDColorSpace>();
+
+    // number format
+    private final NumberFormat formatDecimal = NumberFormat.getNumberInstance(Locale.US);
+    private final byte[] formatBuffer = new byte[32];
+
+    private boolean sourcePageHadContents = false;
+
+    /**
+     * Create a new PDPage content stream. This constructor overwrites all existing content streams
+     * of this page.
+     *
+     * @param document The document the page is part of.
+     * @param sourcePage The page to write the contents to.
+     * @throws IOException If there is an error writing to the page contents.
      */
     public PDPageContentStream(PDDocument document, PDPage sourcePage) throws IOException
     {
-        this(document, sourcePage, false, true);
+        this(document, sourcePage, AppendMode.OVERWRITE, true, false);
+        if (sourcePageHadContents)
+        {
+            Log.w("PdfBox-Android", "You are overwriting an existing content, you should use the append mode");
+        }
     }
 
     /**
@@ -88,11 +130,31 @@ public final class PDPageContentStream implements Closeable
      * @param document The document the page is part of.
      * @param sourcePage The page to write the contents to.
      * @param appendContent Indicates whether content will be overwritten. If false all previous
-     * content is deleted.
+     *                      content is deleted.
+     * @param compress Tell if the content stream should compress the page contents.
+     * @throws IOException If there is an error writing to the page contents.
+     * @deprecated use {@link #PDPageContentStream(PDDocument, PDPage, PDPageContentStream.AppendMode, boolean)}
+     */
+    @Deprecated
+    public PDPageContentStream(PDDocument document, PDPage sourcePage, boolean appendContent,
+        boolean compress) throws IOException
+    {
+        this(document, sourcePage, appendContent, compress, false);
+    }
+
+    /**
+     * Create a new PDPage content stream. If the appendContent parameter is set to
+     * {@link AppendMode#APPEND}, you may want to use
+     * {@link #PDPageContentStream(PDDocument, PDPage, PDPageContentStream.AppendMode, boolean, boolean)}
+     * instead, with the fifth parameter set to true.
+     *
+     * @param document The document the page is part of.
+     * @param sourcePage The page to write the contents to.
+     * @param appendContent Indicates whether content will be overwritten, appended or prepended.
      * @param compress Tell if the content stream should compress the page contents.
      * @throws IOException If there is an error writing to the page contents.
      */
-    public PDPageContentStream(PDDocument document, PDPage sourcePage, boolean appendContent,
+    public PDPageContentStream(PDDocument document, PDPage sourcePage, AppendMode appendContent,
         boolean compress) throws IOException
     {
         this(document, sourcePage, appendContent, compress, false);
@@ -104,19 +166,42 @@ public final class PDPageContentStream implements Closeable
      * @param document The document the page is part of.
      * @param sourcePage The page to write the contents to.
      * @param appendContent Indicates whether content will be overwritten. If false all previous
-     * content is deleted.
+     *                      content is deleted.
      * @param compress Tell if the content stream should compress the page contents.
-     * @param resetContext Tell if the graphic context should be reseted.
+     * @param resetContext Tell if the graphic context should be reseted. You should use this when
+     * appending to an existing stream, because the existing stream may have changed graphic
+     * properties (e.g. scaling, rotation).
      * @throws IOException If there is an error writing to the page contents.
+     * @deprecated use {@link #PDPageContentStream(PDDocument, PDPage, PDPageContentStream.AppendMode, boolean, boolean) }
      */
+    @Deprecated
     public PDPageContentStream(PDDocument document, PDPage sourcePage, boolean appendContent,
         boolean compress, boolean resetContext) throws IOException
     {
-    	this.document = document;
+        this (document, sourcePage, appendContent ? AppendMode.APPEND : AppendMode.OVERWRITE, compress, resetContext);
+    }
+
+    /**
+     * Create a new PDPage content stream.
+     *
+     * @param document The document the page is part of.
+     * @param sourcePage The page to write the contents to.
+     * @param appendContent Indicates whether content will be overwritten, appended or prepended.
+     * @param compress Tell if the content stream should compress the page contents.
+     * @param resetContext Tell if the graphic context should be reset. This is only relevant when
+     * the appendContent parameter is set to {@link AppendMode#APPEND}. You should use this when
+     * appending to an existing stream, because the existing stream may have changed graphic
+     * properties (e.g. scaling, rotation).
+     * @throws IOException If there is an error writing to the page contents.
+     */
+    public PDPageContentStream(PDDocument document, PDPage sourcePage, AppendMode appendContent,
+        boolean compress, boolean resetContext) throws IOException
+    {
+        this.document = document;
         COSName filter = compress ? COSName.FLATE_DECODE : null;
 
-        // If request specifies the need to append to the document
-        if (appendContent && sourcePage.hasContents())
+        // If request specifies the need to append/prepend to the document
+        if (!appendContent.isOverwrite() && sourcePage.hasContents())
         {
             // Create a stream to append new content
             PDStream contentsToAppend = new PDStream(document);
@@ -128,13 +213,19 @@ public final class PDPageContentStream implements Closeable
             {
                 // If contents is already an array, a new stream is simply appended to it
                 array = (COSArray) contents;
-                array.add(contentsToAppend);
             }
             else
             {
                 // Creates a new array and adds the current stream plus a new one to it
                 array = new COSArray();
                 array.add(contents);
+            }
+            if (appendContent.isPrepend())
+            {
+                array.add(0, contentsToAppend.getCOSObject());
+            }
+            else
+            {
                 array.add(contentsToAppend);
             }
 
@@ -150,7 +241,7 @@ public final class PDPageContentStream implements Closeable
                 close();
 
                 // insert the new stream at the beginning
-                array.add(0, saveGraphics.getStream());
+                array.add(0, saveGraphics.getCOSObject());
             }
 
             // Sets the compoundStream as page contents
@@ -165,14 +256,12 @@ public final class PDPageContentStream implements Closeable
         }
         else
         {
-            if (sourcePage.hasContents())
-            {
-            	Log.w("PdfBox-Android", "You are overwriting an existing content, you should use the append mode");
-            }
+            sourcePageHadContents = sourcePage.hasContents();
             PDStream contents = new PDStream(document);
             sourcePage.setContents(contents);
             output = contents.createOutputStream(filter);
         }
+
         // this has to be done here, as the resources will be set to null when resetting the content
         // stream
         resources = sourcePage.getResources();
@@ -183,7 +272,7 @@ public final class PDPageContentStream implements Closeable
         }
 
         // configure NumberFormat
-        formatDecimal.setMaximumFractionDigits(10);
+        formatDecimal.setMaximumFractionDigits(5);
         formatDecimal.setGroupingUsed(false);
     }
 
@@ -196,20 +285,14 @@ public final class PDPageContentStream implements Closeable
      */
     public PDPageContentStream(PDDocument doc, PDAppearanceStream appearance) throws IOException
     {
-        this.document = doc;
-
-        output = appearance.getStream().createOutputStream();
-        this.resources = appearance.getResources();
-
-        formatDecimal.setMaximumFractionDigits(4);
-        formatDecimal.setGroupingUsed(false);
+        this (doc, appearance, appearance.getStream().createOutputStream());
     }
 
     /**
      * Create a new appearance stream. Note that this is not actually a "page" content stream.
      *
      * @param doc The document the appearance is part of.
-     * @param doc The document the appearance is part of.
+     * @param appearance The appearance stream to add to.
      * @param outputStream The appearances output stream to write to.
      * @throws IOException If there is an error writing to the page contents.
      */
@@ -220,6 +303,46 @@ public final class PDPageContentStream implements Closeable
 
         output = outputStream;
         this.resources = appearance.getResources();
+
+        formatDecimal.setMaximumFractionDigits(4);
+        formatDecimal.setGroupingUsed(false);
+    }
+
+    /**
+     * Create a new appearance stream. Note that this is not actually a "page" content stream.
+     *
+     * @param doc The document the appearance is part of.
+     * @param form The XObject form to add to.
+     * @param outputStream The output stream to write to.
+     * @throws IOException If there is an error writing to the page contents.
+     */
+    public PDPageContentStream(PDDocument doc, PDFormXObject form, OutputStream outputStream)
+        throws IOException
+    {
+        this.document = doc;
+
+        output = outputStream;
+        this.resources = form.getResources();
+
+        formatDecimal.setMaximumFractionDigits(4);
+        formatDecimal.setGroupingUsed(false);
+    }
+
+    /**
+     * Create a new appearance stream. Note that this is not actually a "page" content stream.
+     *
+     * @param doc The document the appearance is part of.
+     * @param pattern The pattern to add to.
+     * @param outputStream The output stream to write to.
+     * @throws IOException If there is an error writing to the page contents.
+     */
+    public PDPageContentStream(PDDocument doc, PDTilingPattern pattern, OutputStream outputStream)
+        throws IOException
+    {
+        this.document = doc;
+
+        output = outputStream;
+        this.resources = pattern.getResources();
 
         formatDecimal.setMaximumFractionDigits(4);
         formatDecimal.setGroupingUsed(false);
@@ -238,7 +361,7 @@ public final class PDPageContentStream implements Closeable
         {
             throw new IllegalStateException("Error: Nested beginText() calls are not allowed.");
         }
-        writeOperator("BT");
+        writeOperator(OperatorName.BEGIN_TEXT);
         inTextMode = true;
     }
 
@@ -255,12 +378,12 @@ public final class PDPageContentStream implements Closeable
         {
             throw new IllegalStateException("Error: You must call beginText() before calling endText.");
         }
-        writeOperator("ET");
+        writeOperator(OperatorName.END_TEXT);
         inTextMode = false;
     }
 
     /**
-     * Set the font to draw text with.
+     * Set the font and font size to draw text with.
      *
      * @param font The font to use.
      * @param fontSize The font size to draw the text.
@@ -268,25 +391,25 @@ public final class PDPageContentStream implements Closeable
      */
     public void setFont(PDFont font, float fontSize) throws IOException
     {
-    	if (fontStack.isEmpty())
-    	{
-    		fontStack.add(font);
-    	}
-    	else
-    	{
-    		fontStack.setElementAt(font, fontStack.size() - 1);
-    	}
+        if (fontStack.isEmpty())
+        {
+            fontStack.add(font);
+        }
+        else
+        {
+            fontStack.setElementAt(font, fontStack.size() - 1);
+        }
 
-    	if (font.willBeSubset() && !document.getFontsToSubset().contains(font))
-    	{
-    		document.getFontsToSubset().add(font);
-    	}
+        if (font.willBeSubset())
+        {
+            document.getFontsToSubset().add(font);
+        }
 
-    	writeOperand(resources.add(font));
-    	writeOperand(fontSize);
-    	writeOperator("Tf");
+        writeOperand(resources.add(font));
+        writeOperand(fontSize);
+        writeOperator(OperatorName.SET_FONT_AND_SIZE);
     }
-    
+
     /**
      * This will draw a string at the current location on the screen.
      *
@@ -301,12 +424,62 @@ public final class PDPageContentStream implements Closeable
     }
 
     /**
+     * Shows the given text at the location specified by the current text matrix with the given
+     * interspersed positioning. This allows the user to efficiently position each glyph or sequence
+     * of glyphs.
+     *
+     * @param textWithPositioningArray An array consisting of String and Float types. Each String is
+     * output to the page using the current text matrix. Using the default coordinate system, each
+     * interspersed number adjusts the current text matrix by translating to the left or down for
+     * horizontal and vertical text respectively. The number is expressed in thousands of a text
+     * space unit, and may be negative.
+     *
+     * @throws IOException if an io exception occurs.
+     */
+    public void showTextWithPositioning(Object[] textWithPositioningArray) throws IOException
+    {
+        write("[");
+        for (Object obj : textWithPositioningArray)
+        {
+            if (obj instanceof String)
+            {
+                showTextInternal((String) obj);
+            }
+            else if (obj instanceof Float)
+            {
+                writeOperand((Float) obj);
+            }
+            else
+            {
+                throw new IllegalArgumentException("Argument must consist of array of Float and String types");
+            }
+        }
+        write("] ");
+        writeOperator(OperatorName.SHOW_TEXT_ADJUSTED);
+    }
+
+    /**
      * Shows the given text at the location specified by the current text matrix.
      *
      * @param text The Unicode text to show.
      * @throws IOException If an io exception occurs.
+     * @throws IllegalArgumentException if a character isn't supported by the current font
      */
     public void showText(String text) throws IOException
+    {
+        showTextInternal(text);
+        write(" ");
+        writeOperator(OperatorName.SHOW_TEXT);
+    }
+
+    /**
+     * Outputs a string using the correct encoding and subsetting as required.
+     *
+     * @param text The Unicode text to show.
+     *
+     * @throws IOException If an io exception occurs.
+     */
+    protected void showTextInternal(String text) throws IOException
     {
         if (!inTextMode)
         {
@@ -323,45 +496,56 @@ public final class PDPageContentStream implements Closeable
         // Unicode code points to keep when subsetting
         if (font.willBeSubset())
         {
-            for (int offset = 0; offset < text.length(); )
+            int offset = 0;
+            while (offset < text.length())
             {
                 int codePoint = text.codePointAt(offset);
                 font.addToSubset(codePoint);
                 offset += Character.charCount(codePoint);
             }
-
         }
 
         COSWriter.writeString(font.encode(text), output);
-        write(" ");
-        
-        writeOperator("Tj");
-    }    
-    
+    }
+
+    /**
+     * Sets the text leading.
+     *
+     * @param leading The leading in unscaled text units.
+     * @throws IOException If there is an error writing to the stream.
+     * @deprecated use {@link #setLeading(float) setLeading(float)}
+     */
+    @Deprecated
+    public void setLeading(double leading) throws IOException
+    {
+        setLeading((float) leading);
+    }
+
     /**
      * Sets the text leading.
      *
      * @param leading The leading in unscaled text units.
      * @throws IOException If there is an error writing to the stream.
      */
-    public void setLeading(double leading) throws IOException
+    public void setLeading(float leading) throws IOException
     {
-    	writeOperand((float) leading);
-    	writeOperator("TL");
+        writeOperand(leading);
+        writeOperator(OperatorName.SET_TEXT_LEADING);
     }
 
     /**
-     * Move to the start of the next line of text. Requires the leading to have been set.
+     * Move to the start of the next line of text. Requires the leading (see {@link #setLeading})
+     * to have been set.
      *
      * @throws IOException If there is an error writing to the stream.
      */
     public void newLine() throws IOException
     {
-    	if (!inTextMode)
-    	{
-    		throw new IllegalStateException("Must call beginText() before newLine()");
-    	}
-    	writeOperator("T*");
+        if (!inTextMode)
+        {
+            throw new IllegalStateException("Must call beginText() before newLine()");
+        }
+        writeOperator(OperatorName.NEXT_LINE);
     }
 
     /**
@@ -375,7 +559,7 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void moveTextPositionByAmount(float tx, float ty) throws IOException
     {
-    	newLineAtOffset(tx, ty);
+        newLineAtOffset(tx, ty);
     }
 
     /**
@@ -395,7 +579,7 @@ public final class PDPageContentStream implements Closeable
         }
         writeOperand(tx);
         writeOperand(ty);
-        writeOperator("Td");
+        writeOperator(OperatorName.MOVE_TEXT);
     }
 
     /**
@@ -413,22 +597,22 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void setTextMatrix(double a, double b, double c, double d, double e, double f) throws IOException
     {
-    	setTextMatrix(new Matrix((float) a, (float) b, (float) c, (float) d, (float) e, (float) f));
+        setTextMatrix(new Matrix((float)a, (float)b, (float)c, (float)d, (float)e, (float)f));
     }
 
     /**
-    * The Tm operator. Sets the text matrix to the given values.
-    * A current text matrix will be replaced with the new one.
-    * @param matrix the transformation matrix
-    * @throws IOException If there is an error writing to the stream.
-    * @deprecated Use {@link #setTextMatrix(Matrix)} instead.
-    */
+     * The Tm operator. Sets the text matrix to the given values.
+     * A current text matrix will be replaced with the new one.
+     * @param matrix the transformation matrix
+     * @throws IOException If there is an error writing to the stream.
+     * @deprecated Use {@link #setTextMatrix(Matrix)} instead.
+     */
     @Deprecated
     public void setTextMatrix(AffineTransform matrix) throws IOException
     {
-    	setTextMatrix(new Matrix(matrix));
+        setTextMatrix(new Matrix(matrix));
     }
-    
+
     /**
      * The Tm operator. Sets the text matrix to the given values.
      * A current text matrix will be replaced with the new one.
@@ -439,12 +623,12 @@ public final class PDPageContentStream implements Closeable
      */
     public void setTextMatrix(Matrix matrix) throws IOException
     {
-    	if (!inTextMode)
-    	{
-    		throw new IllegalStateException("Error: must call beginText() before setTextMatrix");
-    	}
-    	writeAffineTransform(matrix.createAffineTransform());
-    	writeOperator("Tm");
+        if (!inTextMode)
+        {
+            throw new IllegalStateException("Error: must call beginText() before setTextMatrix");
+        }
+        writeAffineTransform(matrix.createAffineTransform());
+        writeOperator(OperatorName.SET_MATRIX);
     }
 
     /**
@@ -460,7 +644,7 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void setTextScaling(double sx, double sy, double tx, double ty) throws IOException
     {
-    	setTextMatrix(new Matrix((float) sx, 0f, 0f, (float) sy, (float) tx, (float) ty));
+        setTextMatrix(new Matrix((float) sx, 0f, 0f, (float) sy, (float) tx, (float) ty));
     }
 
     /**
@@ -474,9 +658,9 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void setTextTranslation(double tx, double ty) throws IOException
     {
-    	setTextMatrix(Matrix.getTranslateInstance((float) tx, (float) ty));
+        setTextMatrix(Matrix.getTranslateInstance((float) tx, (float) ty));
     }
-    
+
     /**
      * The Tm operator. Sets the text matrix to the given rotation and translation values.
      * A current text matrix will be replaced with the new one.
@@ -489,9 +673,9 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void setTextRotation(double angle, double tx, double ty) throws IOException
     {
-    	setTextMatrix(Matrix.getRotateInstance(angle, (float) tx, (float) ty));
+        setTextMatrix(Matrix.getRotateInstance(angle, (float) tx, (float) ty));
     }
-    
+
     /**
      * Draw an image at the x,y coordinates, with the default size of the image.
      *
@@ -503,9 +687,9 @@ public final class PDPageContentStream implements Closeable
      */
     public void drawImage(PDImageXObject image, float x, float y) throws IOException
     {
-    	drawImage(image, x, y, image.getWidth(), image.getHeight());
+        drawImage(image, x, y, image.getWidth(), image.getHeight());
     }
-    
+
     /**
      * Draw an image at the x,y coordinates, with the given size.
      *
@@ -520,18 +704,47 @@ public final class PDPageContentStream implements Closeable
      */
     public void drawImage(PDImageXObject image, float x, float y, float width, float height) throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: drawImage is not allowed within a text block.");
-    	}
-    	saveGraphicsState();
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: drawImage is not allowed within a text block.");
+        }
 
-    	AffineTransform transform = new AffineTransform(width, 0, 0, height, x, y);
-    	transform(new Matrix(transform));
-    	writeOperand(resources.add(image));
-    	writeOperator("Do");
-    	
-    	restoreGraphicsState();
+        saveGraphicsState();
+
+        AffineTransform transform = new AffineTransform(width, 0, 0, height, x, y);
+        transform(new Matrix(transform));
+
+        writeOperand(resources.add(image));
+        writeOperator(OperatorName.DRAW_OBJECT);
+
+        restoreGraphicsState();
+    }
+
+    /**
+     * Draw an image at the origin with the given transformation matrix.
+     *
+     * @param image The image to draw.
+     * @param matrix The transformation matrix to apply to the image.
+     *
+     * @throws IOException If there is an error writing to the stream.
+     * @throws IllegalStateException If the method was called within a text block.
+     */
+    public void drawImage(PDImageXObject image, Matrix matrix) throws IOException
+    {
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: drawImage is not allowed within a text block.");
+        }
+
+        saveGraphicsState();
+
+        AffineTransform transform = matrix.createAffineTransform();
+        transform(new Matrix(transform));
+
+        writeOperand(resources.add(image));
+        writeOperator(OperatorName.DRAW_OBJECT);
+
+        restoreGraphicsState();
     }
 
     /**
@@ -577,8 +790,7 @@ public final class PDPageContentStream implements Closeable
      * @deprecated Use {@link #drawImage(PDInlineImage, float, float, float, float)} instead.
      */
     @Deprecated
-    public void drawInlineImage(PDInlineImage inlineImage, float x, float y, float width,
-        float height) throws IOException
+    public void drawInlineImage(PDInlineImage inlineImage, float x, float y, float width, float height) throws IOException
     {
         drawImage(inlineImage, x, y, width, height);
     }
@@ -595,8 +807,7 @@ public final class PDPageContentStream implements Closeable
      * @throws IOException If there is an error writing to the stream.
      * @throws IllegalStateException If the method was called within a text block.
      */
-    public void drawImage(PDInlineImage inlineImage, float x, float y, float width, float height)
-        throws IOException
+    public void drawImage(PDInlineImage inlineImage, float x, float y, float width, float height) throws IOException
     {
         if (inTextMode)
         {
@@ -608,7 +819,7 @@ public final class PDPageContentStream implements Closeable
 
         // create the image dictionary
         StringBuilder sb = new StringBuilder();
-        sb.append("BI");
+        sb.append(OperatorName.BEGIN_INLINE_IMAGE);
 
         sb.append("\n /W ");
         sb.append(inlineImage.getWidth());
@@ -645,10 +856,10 @@ public final class PDPageContentStream implements Closeable
         writeLine();
 
         // binary data
-        writeOperator("ID");
+        writeOperator(OperatorName.BEGIN_INLINE_IMAGE_DATA);
         writeBytes(inlineImage.getData());
         writeLine();
-        writeOperator("EI");
+        writeOperator(OperatorName.END_INLINE_IMAGE);
 
         restoreGraphicsState();
     }
@@ -668,8 +879,8 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void drawXObject(PDXObject xobject, float x, float y, float width, float height) throws IOException
     {
-    	AffineTransform transform = new AffineTransform(width, 0, 0, height, x, y);
-    	drawXObject(xobject, transform);
+        AffineTransform transform = new AffineTransform(width, 0, 0, height, x, y);
+        drawXObject(xobject, transform);
     }
 
     /**
@@ -680,32 +891,36 @@ public final class PDPageContentStream implements Closeable
      * @param transform the transformation matrix
      * @throws IOException If there is an error writing to the stream.
      * @throws IllegalStateException If the method was called within a text block.
-     * @deprecated Use {@link #drawImage} or {@link #drawForm} instead.
+     * @deprecated Use {@link #drawImage(PDImageXObject, Matrix) drawImage(PDImageXObject, Matrix)}
+     * or {@link #drawForm(PDFormXObject) drawForm(PDFormXObject)} with
+     * {@link #transform(Matrix) transform(Matrix)} instead.
      */
     @Deprecated
     public void drawXObject(PDXObject xobject, AffineTransform transform) throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: drawXObject is not allowed within a text block.");
-    	}
-    	String xObjectPrefix;
-    	if (xobject instanceof PDImageXObject)
-    	{
-    		xObjectPrefix = "Im";
-    	}
-    	else
-    	{
-    		xObjectPrefix = "Form";
-    	}
-    	COSName objMapping = resources.add(xobject, xObjectPrefix);
-    	
-    	saveGraphicsState();
-    	transform(new Matrix(transform));
-    	writeOperand(objMapping);
-    	writeOperator("Do");
-    	
-    	restoreGraphicsState();
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: drawXObject is not allowed within a text block.");
+        }
+
+        String xObjectPrefix;
+        if (xobject instanceof PDImageXObject)
+        {
+            xObjectPrefix = "Im";
+        }
+        else
+        {
+            xObjectPrefix = "Form";
+        }
+        COSName objMapping = resources.add(xobject, xObjectPrefix);
+
+        saveGraphicsState();
+        transform(new Matrix(transform));
+
+        writeOperand(objMapping);
+        writeOperator(OperatorName.DRAW_OBJECT);
+
+        restoreGraphicsState();
     }
 
     /**
@@ -717,12 +932,13 @@ public final class PDPageContentStream implements Closeable
      */
     public void drawForm(PDFormXObject form) throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: drawForm is not allowed within a text block.");
-    	}
-    	writeOperand(resources.add(form));
-    	writeOperator("Do");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: drawForm is not allowed within a text block.");
+        }
+
+        writeOperand(resources.add(form));
+        writeOperator(OperatorName.DRAW_OBJECT);
     }
 
     /**
@@ -739,7 +955,7 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void concatenate2CTM(double a, double b, double c, double d, double e, double f) throws IOException
     {
-    	transform(new Matrix((float) a, (float) b, (float) c, (float) d, (float) e, (float) f));
+        transform(new Matrix((float) a, (float) b, (float) c, (float) d, (float) e, (float) f));
     }
 
     /**
@@ -752,40 +968,53 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void concatenate2CTM(AffineTransform at) throws IOException
     {
-    	transform(new Matrix(at));
+        transform(new Matrix(at));
     }
-    
+
     /**
-     * The cm operator. Concatenates the given matrix with the CTM.
+     * The cm operator. Concatenates the given matrix with the current transformation matrix (CTM),
+     * which maps user space coordinates used within a PDF content stream into output device
+     * coordinates. More details on coordinates can be found in the PDF 32000 specification, 8.3.2
+     * Coordinate Spaces.
      *
      * @param matrix the transformation matrix
      * @throws IOException If there is an error writing to the stream.
      */
     public void transform(Matrix matrix) throws IOException
     {
-    	writeAffineTransform(matrix.createAffineTransform());
-    	writeOperator("cm");
+        if (inTextMode)
+        {
+            Log.w("PdfBox-Android", "Modifying the current transformation matrix is not allowed within text objects.");
+        }
+
+        writeAffineTransform(matrix.createAffineTransform());
+        writeOperator(OperatorName.CONCAT);
     }
-    
+
     /**
      * q operator. Saves the current graphics state.
      * @throws IOException If an error occurs while writing to the stream.
      */
     public void saveGraphicsState() throws IOException
     {
-    	if (!fontStack.isEmpty())
-    	{
-    		fontStack.push(fontStack.peek());
-    	}
-    	if (!strokingColorSpaceStack.isEmpty())
-    	{
-    		strokingColorSpaceStack.push(strokingColorSpaceStack.peek());
-    	}
-    	if (!nonStrokingColorSpaceStack.isEmpty())
-    	{
-    		nonStrokingColorSpaceStack.push(nonStrokingColorSpaceStack.peek());
-    	}
-    	writeOperator("q");
+        if (inTextMode)
+        {
+            Log.w("PdfBox-Android", "Saving the graphics state is not allowed within text objects.");
+        }
+
+        if (!fontStack.isEmpty())
+        {
+            fontStack.push(fontStack.peek());
+        }
+        if (!strokingColorSpaceStack.isEmpty())
+        {
+            strokingColorSpaceStack.push(strokingColorSpaceStack.peek());
+        }
+        if (!nonStrokingColorSpaceStack.isEmpty())
+        {
+            nonStrokingColorSpaceStack.push(nonStrokingColorSpaceStack.peek());
+        }
+        writeOperator(OperatorName.SAVE);
     }
 
     /**
@@ -794,19 +1023,24 @@ public final class PDPageContentStream implements Closeable
      */
     public void restoreGraphicsState() throws IOException
     {
-    	if (!fontStack.isEmpty())
-    	{
-    		fontStack.pop();
-    	}
-    	if (!strokingColorSpaceStack.isEmpty())
-    	{
-    		strokingColorSpaceStack.pop();
-    	}
-    	if (!nonStrokingColorSpaceStack.isEmpty())
-    	{
-    		nonStrokingColorSpaceStack.pop();
-    	}
-    	writeOperator("Q");
+        if (inTextMode)
+        {
+            Log.w("PdfBox-Android", "Restoring the graphics state is not allowed within text objects.");
+        }
+
+        if (!fontStack.isEmpty())
+        {
+            fontStack.pop();
+        }
+        if (!strokingColorSpaceStack.isEmpty())
+        {
+            strokingColorSpaceStack.pop();
+        }
+        if (!nonStrokingColorSpaceStack.isEmpty())
+        {
+            nonStrokingColorSpaceStack.pop();
+        }
+        writeOperator(OperatorName.RESTORE);
     }
 
     /**
@@ -820,17 +1054,9 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void setStrokingColorSpace(PDColorSpace colorSpace) throws IOException
     {
-    	if (strokingColorSpaceStack.isEmpty())
-    	{
-    		strokingColorSpaceStack.add(colorSpace);
-    	}
-    	else
-    	{
-    		strokingColorSpaceStack.setElementAt(colorSpace, nonStrokingColorSpaceStack.size() - 1);
-    	}
-
-    	writeOperand(getName(colorSpace));
-    	writeOperator("CS");
+        setStrokingColorSpaceStack(colorSpace);
+        writeOperand(getName(colorSpace));
+        writeOperator(OperatorName.STROKING_COLORSPACE);
     }
 
     /**
@@ -839,37 +1065,28 @@ public final class PDPageContentStream implements Closeable
      *
      * @param colorSpace The colorspace to write.
      * @throws IOException If there is an error writing the colorspace.
-     * @deprecated Use {@link #setNonStrokingColor} instead.
+     * @deprecated Use {@link #setNonStrokingColor(PDColor)} instead.
      */
     @Deprecated
     public void setNonStrokingColorSpace(PDColorSpace colorSpace) throws IOException
     {
-    	if (nonStrokingColorSpaceStack.isEmpty())
-    	{
-    		nonStrokingColorSpaceStack.add(colorSpace);
-    	}
-    	else
-    	{
-    		nonStrokingColorSpaceStack.setElementAt(colorSpace, nonStrokingColorSpaceStack.size() - 1);
-    	}
-
-    	writeOperand(getName(colorSpace));
-    	writeOperator("cs");
+        setNonStrokingColorSpaceStack(colorSpace);
+        writeOperand(getName(colorSpace));
+        writeOperator(OperatorName.NON_STROKING_COLORSPACE);
     }
 
     private COSName getName(PDColorSpace colorSpace) throws IOException
     {
-    	COSName key;
-    	if (colorSpace instanceof PDDeviceGray ||
-    			colorSpace instanceof PDDeviceRGB /*|| TODO: PdfBox-Android
-    			colorSpace instanceof PDDeviceCMYK*/)
-    	{
-    		return COSName.getPDFName(colorSpace.getName());
-    	}
-    	else
-    	{
-    		return resources.add(colorSpace);
-    	}
+        if (colorSpace instanceof PDDeviceGray ||
+            colorSpace instanceof PDDeviceRGB /*||
+            colorSpace instanceof PDDeviceCMYK TODO: PdfBox-Android*/)
+        {
+            return COSName.getPDFName(colorSpace.getName());
+        }
+        else
+        {
+            return resources.add(colorSpace);
+        }
     }
 
     /**
@@ -880,43 +1097,34 @@ public final class PDPageContentStream implements Closeable
      */
     public void setStrokingColor(PDColor color) throws IOException
     {
-    	if (strokingColorSpaceStack.isEmpty() ||
-    			strokingColorSpaceStack.peek() != color.getColorSpace())
+        if (strokingColorSpaceStack.isEmpty() ||
+            strokingColorSpaceStack.peek() != color.getColorSpace())
         {
-    		writeOperand(getName(color.getColorSpace()));
-    		writeOperator("CS");
-
-    		if (strokingColorSpaceStack.isEmpty())
-    		{
-    			strokingColorSpaceStack.add(color.getColorSpace());
-    		}
-    		else
-    		{
-    			strokingColorSpaceStack.setElementAt(color.getColorSpace(),
-    					nonStrokingColorSpaceStack.size() - 1);
-    		}
+            writeOperand(getName(color.getColorSpace()));
+            writeOperator(OperatorName.STROKING_COLORSPACE);
+            setStrokingColorSpaceStack(color.getColorSpace());
         }
 
-    	for (float value : color.getComponents())
-    	{
-    		writeOperand(value);
-    	}
+        for (float value : color.getComponents())
+        {
+            writeOperand(value);
+        }
 
-//    	if (color.getColorSpace() instanceof PDPattern)
-//    	{
-//    		writeOperand(color.getPatternName());
-//    	}
-//
-//    	if (color.getColorSpace() instanceof PDPattern ||
-//    			color.getColorSpace() instanceof PDSeparation ||
-//    			color.getColorSpace() instanceof PDDeviceN ||
-//    			color.getColorSpace() instanceof PDICCBased)
-//    	{
-//            writeOperator("SCN");
+//        if (color.getColorSpace() instanceof PDPattern)
+//        {
+//            writeOperand(color.getPatternName());
+//        }
+
+//        if (color.getColorSpace() instanceof PDPattern ||
+//            color.getColorSpace() instanceof PDSeparation ||
+//            color.getColorSpace() instanceof PDDeviceN ||
+//            color.getColorSpace() instanceof PDICCBased)
+//        {
+//            writeOperator(OperatorName.STROKING_COLOR_N);
 //        }
 //        else
 //        {
-            writeOperator("SC");
+            writeOperator(OperatorName.STROKING_COLOR);
 //        } TODO: PdfBox-Android
     }
 
@@ -928,10 +1136,10 @@ public final class PDPageContentStream implements Closeable
      */
     public void setStrokingColor(AWTColor color) throws IOException
     {
-    	float[] components = new float[] {
-    			color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f };
-    	PDColor pdColor = new PDColor(components, PDDeviceRGB.INSTANCE);
-    	setStrokingColor(pdColor);
+        float[] components = new float[] {
+            color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f };
+        PDColor pdColor = new PDColor(components, PDDeviceRGB.INSTANCE);
+        setStrokingColor(pdColor);
     }
 
     /**
@@ -944,34 +1152,34 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void setStrokingColor(float[] components) throws IOException
     {
-    	if (strokingColorSpaceStack.isEmpty())
-    	{
-    		throw new IllegalStateException("The color space must be set before setting a color");
-    	}
+        if (strokingColorSpaceStack.isEmpty())
+        {
+            throw new IllegalStateException("The color space must be set before setting a color");
+        }
 
-    	for (int i = 0; i < components.length; i++)
-    	{
-    		writeOperand(components[i]);
-    	}
+        for (float component : components)
+        {
+            writeOperand(component);
+        }
 
-    	PDColorSpace currentStrokingColorSpace = strokingColorSpaceStack.peek();
+        PDColorSpace currentStrokingColorSpace = strokingColorSpaceStack.peek();
 
-//    	if (currentStrokingColorSpace instanceof PDSeparation ||
-//    			currentStrokingColorSpace instanceof PDPattern ||
-//    			currentStrokingColorSpace instanceof PDICCBased)
-//    	{
-//    		writeOperator("SCN");
-//    	}
-//    	else
-//    	{
-    		writeOperator("SC");
-//    	} TODO: PdfBox-Android
+//        if (currentStrokingColorSpace instanceof PDSeparation ||
+//            currentStrokingColorSpace instanceof PDPattern ||
+//            currentStrokingColorSpace instanceof PDICCBased)
+//        {
+//            writeOperator(OperatorName.STROKING_COLOR_N);
+//        }
+//        else
+//        {
+            writeOperator(OperatorName.STROKING_COLOR);
+//        } TODO: PdfBox-Android
     }
 
     /**
      * Set the stroking color in the DeviceRGB color space. Range is 0..255.
      *
-     * @param r The red value.
+     * @param r The red value
      * @param g The green value.
      * @param b The blue value.
      * @throws IOException If an IO error occurs while writing to the stream.
@@ -982,12 +1190,13 @@ public final class PDPageContentStream implements Closeable
         if (isOutside255Interval(r) || isOutside255Interval(g) || isOutside255Interval(b))
         {
             throw new IllegalArgumentException("Parameters must be within 0..255, but are "
-                    + String.format("(%d,%d,%d)", r, g, b));
+                + String.format("(%d,%d,%d)", r, g, b));
         }
         writeOperand(r / 255f);
         writeOperand(g / 255f);
         writeOperand(b / 255f);
-        writeOperator("RG");
+        writeOperator(OperatorName.STROKING_COLOR_RGB);
+        setStrokingColorSpaceStack(PDDeviceRGB.INSTANCE);
     }
 
     /**
@@ -1007,9 +1216,9 @@ public final class PDPageContentStream implements Closeable
         if (isOutside255Interval(c) || isOutside255Interval(m) || isOutside255Interval(y) || isOutside255Interval(k))
         {
             throw new IllegalArgumentException("Parameters must be within 0..255, but are "
-                    + String.format("(%d,%d,%d,%d)", c, m, y, k));
+                + String.format("(%d,%d,%d,%d)", c, m, y, k));
         }
-    	setStrokingColor(c / 255f, m / 255f, y / 255f, k / 255f);
+        setStrokingColor(c / 255f, m / 255f, y / 255f, k / 255f);
     }
 
     /**
@@ -1027,13 +1236,14 @@ public final class PDPageContentStream implements Closeable
         if (isOutsideOneInterval(c) || isOutsideOneInterval(m) || isOutsideOneInterval(y) || isOutsideOneInterval(k))
         {
             throw new IllegalArgumentException("Parameters must be within 0..1, but are "
-                    + String.format("(%.2f,%.2f,%.2f,%.2f)", c, m, y, k));
+                + String.format("(%.2f,%.2f,%.2f,%.2f)", c, m, y, k));
         }
         writeOperand(c);
         writeOperand(m);
         writeOperand(y);
         writeOperand(k);
-        writeOperator("K");
+        writeOperator(OperatorName.STROKING_COLOR_CMYK);
+//        setStrokingColorSpaceStack(PDDeviceCMYK.INSTANCE); TODO: PdfBox-Android
     }
 
     /**
@@ -1042,7 +1252,7 @@ public final class PDPageContentStream implements Closeable
      * @param g The gray value.
      * @throws IOException If an IO error occurs while writing to the stream.
      * @throws IllegalArgumentException If the parameter is invalid.
-     * @deprecated Use {@link #setStrokingColor(double)} instead.
+     * @deprecated Use {@link #setStrokingColor(float)} instead.
      */
     @Deprecated
     public void setStrokingColor(int g) throws IOException
@@ -1051,7 +1261,21 @@ public final class PDPageContentStream implements Closeable
         {
             throw new IllegalArgumentException("Parameter must be within 0..255, but is " + g);
         }
-    	setStrokingColor(g / 255f);
+        setStrokingColor(g / 255f);
+    }
+
+    /**
+     * Set the stroking color in the DeviceGray color space. Range is 0..1.
+     *
+     * @param g The gray value.
+     * @throws IOException If an IO error occurs while writing to the stream.
+     * @throws IllegalArgumentException If the parameter is invalid.
+     * @deprecated use {@link #setStrokingColor(float) setStrokingColor(float)}
+     */
+    @Deprecated
+    public void setStrokingColor(double g) throws IOException
+    {
+        setStrokingColor((float) g);
     }
 
     /**
@@ -1061,14 +1285,15 @@ public final class PDPageContentStream implements Closeable
      * @throws IOException If an IO error occurs while writing to the stream.
      * @throws IllegalArgumentException If the parameter is invalid.
      */
-    public void setStrokingColor(double g) throws IOException
+    public void setStrokingColor(float g) throws IOException
     {
         if (isOutsideOneInterval(g))
         {
             throw new IllegalArgumentException("Parameter must be within 0..1, but is " + g);
         }
-        writeOperand((float) g);
-        writeOperator("G");
+        writeOperand(g);
+        writeOperator(OperatorName.STROKING_COLOR_GRAY);
+        setStrokingColorSpaceStack(PDDeviceGray.INSTANCE);
     }
 
     /**
@@ -1079,44 +1304,35 @@ public final class PDPageContentStream implements Closeable
      */
     public void setNonStrokingColor(PDColor color) throws IOException
     {
-    	if (nonStrokingColorSpaceStack.isEmpty() ||
-    			nonStrokingColorSpaceStack.peek() != color.getColorSpace())
-    	{
-    		writeOperand(getName(color.getColorSpace()));
-    		writeOperator("cs");
+        if (nonStrokingColorSpaceStack.isEmpty() ||
+            nonStrokingColorSpaceStack.peek() != color.getColorSpace())
+        {
+            writeOperand(getName(color.getColorSpace()));
+            writeOperator(OperatorName.NON_STROKING_COLORSPACE);
+            setNonStrokingColorSpaceStack(color.getColorSpace());
+        }
 
-    		if (nonStrokingColorSpaceStack.isEmpty())
-    		{
-    			nonStrokingColorSpaceStack.add(color.getColorSpace());
-    		}
-    		else
-    		{
-    			nonStrokingColorSpaceStack.setElementAt(color.getColorSpace(),
-    					nonStrokingColorSpaceStack.size() - 1);
-    		}
-    	}
+        for (float value : color.getComponents())
+        {
+            writeOperand(value);
+        }
 
-    	for (float value : color.getComponents())
-    	{
-    		writeOperand(value);
-    	}
+//        if (color.getColorSpace() instanceof PDPattern)
+//        {
+//            writeOperand(color.getPatternName());
+//        }
 
-//    	if (color.getColorSpace() instanceof PDPattern)
-//    	{
-//    		writeOperand(color.getPatternName());
-//    	}
-//
-//    	if (color.getColorSpace() instanceof PDPattern ||
-//    			color.getColorSpace() instanceof PDSeparation ||
-//    			color.getColorSpace() instanceof PDDeviceN ||
-//    			color.getColorSpace() instanceof PDICCBased)
-//    	{
-//    		writeOperator("scn");
-//    	}
-//    	else
-//    	{
-    		writeOperator("sc");
-//    	} TODO: PdfBox-Android
+//        if (color.getColorSpace() instanceof PDPattern ||
+//            color.getColorSpace() instanceof PDSeparation ||
+//            color.getColorSpace() instanceof PDDeviceN ||
+//            color.getColorSpace() instanceof PDICCBased)
+//        {
+//            writeOperator(OperatorName.NON_STROKING_COLOR_N);
+//        }
+//        else
+//        {
+            writeOperator(OperatorName.NON_STROKING_COLOR);
+//        } TODO: PdfBox-Android
     }
 
     /**
@@ -1127,10 +1343,10 @@ public final class PDPageContentStream implements Closeable
      */
     public void setNonStrokingColor(AWTColor color) throws IOException
     {
-    	float[] components = new float[] {
-    			color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f };
-    	PDColor pdColor = new PDColor(components, PDDeviceRGB.INSTANCE);
-    	setNonStrokingColor(pdColor);
+        float[] components = new float[] {
+            color.getRed() / 255f, color.getGreen() / 255f, color.getBlue() / 255f };
+        PDColor pdColor = new PDColor(components, PDDeviceRGB.INSTANCE);
+        setNonStrokingColor(pdColor);
     }
 
     /**
@@ -1143,26 +1359,27 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void setNonStrokingColor(float[] components) throws IOException
     {
-    	if (nonStrokingColorSpaceStack.isEmpty())
-    	{
-    		throw new IllegalStateException("The color space must be set before setting a color");
-    	}
+        if (nonStrokingColorSpaceStack.isEmpty())
+        {
+            throw new IllegalStateException("The color space must be set before setting a color");
+        }
 
-//        for (int i = 0; i < components.length; i++)
-//        {
-//            writeOperator(components[i]);
-//        }
+        for (float component : components)
+        {
+            writeOperand(component);
+        }
+
         PDColorSpace currentNonStrokingColorSpace = nonStrokingColorSpaceStack.peek();
 
 //        if (currentNonStrokingColorSpace instanceof PDSeparation ||
 //            currentNonStrokingColorSpace instanceof PDPattern ||
 //            currentNonStrokingColorSpace instanceof PDICCBased)
 //        {
-//            writeOperator("scn");
+//            writeOperator(OperatorName.NON_STROKING_COLOR_N);
 //        }
 //        else
 //        {
-            writeOperator("sc");
+            writeOperator(OperatorName.NON_STROKING_COLOR);
 //        } TODO: PdfBox-Android
     }
 
@@ -1180,12 +1397,13 @@ public final class PDPageContentStream implements Closeable
         if (isOutside255Interval(r) || isOutside255Interval(g) || isOutside255Interval(b))
         {
             throw new IllegalArgumentException("Parameters must be within 0..255, but are "
-                    + String.format("(%d,%d,%d)", r, g, b));
+                + String.format("(%d,%d,%d)", r, g, b));
         }
         writeOperand(r / 255f);
         writeOperand(g / 255f);
         writeOperand(b / 255f);
-        writeOperator("rg");
+        writeOperator(OperatorName.NON_STROKING_RGB);
+        setNonStrokingColorSpaceStack(PDDeviceRGB.INSTANCE);
     }
 
     /**
@@ -1203,33 +1421,50 @@ public final class PDPageContentStream implements Closeable
         if (isOutside255Interval(c) || isOutside255Interval(m) || isOutside255Interval(y) || isOutside255Interval(k))
         {
             throw new IllegalArgumentException("Parameters must be within 0..255, but are "
-                    + String.format("(%d,%d,%d,%d)", c, m, y, k));
+                + String.format("(%d,%d,%d,%d)", c, m, y, k));
         }
-    	setNonStrokingColor(c / 255f, m / 255f, y / 255f, k / 255f);
+        setNonStrokingColor(c / 255f, m / 255f, y / 255f, k / 255f);
     }
 
     /**
-     * Set the non-stroking color in the DeviceRGB color space. Range is 0..1.
+     * Set the non-stroking color in the DeviceCMYK color space. Range is 0..1.
      *
      * @param c The cyan value.
      * @param m The magenta value.
      * @param y The yellow value.
      * @param k The black value.
      * @throws IOException If an IO error occurs while writing to the stream.
-     * @throws IllegalArgumentException If the parameters are invalid.
+     * @deprecated use
+     * {@link #setNonStrokingColor(float, float, float, float) setNonStrokingColor(float, float, float, float)}
      */
+    @Deprecated
     public void setNonStrokingColor(double c, double m, double y, double k) throws IOException
+    {
+        setNonStrokingColor((float) c, (float) m, (float) y, (float) k);
+    }
+
+    /**
+     * Set the non-stroking color in the DeviceCMYK color space. Range is 0..1.
+     *
+     * @param c The cyan value.
+     * @param m The magenta value.
+     * @param y The yellow value.
+     * @param k The black value.
+     * @throws IOException If an IO error occurs while writing to the stream.
+     */
+    public void setNonStrokingColor(float c, float m, float y, float k) throws IOException
     {
         if (isOutsideOneInterval(c) || isOutsideOneInterval(m) || isOutsideOneInterval(y) || isOutsideOneInterval(k))
         {
             throw new IllegalArgumentException("Parameters must be within 0..1, but are "
-                    + String.format("(%.2f,%.2f,%.2f,%.2f)", c, m, y, k));
+                + String.format("(%.2f,%.2f,%.2f,%.2f)", c, m, y, k));
         }
-        writeOperand((float) c);
-        writeOperand((float) m);
-        writeOperand((float) y);
-        writeOperand((float) k);
-        writeOperator("k");
+        writeOperand(c);
+        writeOperand(m);
+        writeOperand(y);
+        writeOperand(k);
+        writeOperator(OperatorName.NON_STROKING_CMYK);
+//        setNonStrokingColorSpaceStack(PDDeviceCMYK.INSTANCE); TODO: PdfBox-Android
     }
 
     /**
@@ -1245,7 +1480,21 @@ public final class PDPageContentStream implements Closeable
         {
             throw new IllegalArgumentException("Parameter must be within 0..255, but is " + g);
         }
-    	setNonStrokingColor(g / 255f);
+        setNonStrokingColor(g / 255f);
+    }
+
+    /**
+     * Set the non-stroking color in the DeviceGray color space. Range is 0..1.
+     *
+     * @param g The gray value.
+     * @throws IOException If an IO error occurs while writing to the stream.
+     * @throws IllegalArgumentException If the parameter is invalid.
+     * @deprecated use {@link #setNonStrokingColor(float) setNonStrokingColor(float)}
+     */
+    @Deprecated
+    public void setNonStrokingColor(double g) throws IOException
+    {
+        setNonStrokingColor((float) g);
     }
 
     /**
@@ -1255,14 +1504,15 @@ public final class PDPageContentStream implements Closeable
      * @throws IOException If an IO error occurs while writing to the stream.
      * @throws IllegalArgumentException If the parameter is invalid.
      */
-    public void setNonStrokingColor(double g) throws IOException
+    public void setNonStrokingColor(float g) throws IOException
     {
         if (isOutsideOneInterval(g))
         {
             throw new IllegalArgumentException("Parameter must be within 0..1, but is " + g);
         }
-        writeOperand((float) g);
-        writeOperator("g");
+        writeOperand(g);
+        writeOperator(OperatorName.NON_STROKING_GRAY);
+        setNonStrokingColorSpaceStack(PDDeviceGray.INSTANCE);
     }
 
     /**
@@ -1285,11 +1535,11 @@ public final class PDPageContentStream implements Closeable
         writeOperand(y);
         writeOperand(width);
         writeOperand(height);
-        writeOperator("re");
+        writeOperator(OperatorName.APPEND_RECT);
     }
 
     /**
-     * Draw a rectangle on the page using the current non stroking color.
+     * Fill a rectangle on the page using the current non stroking color.
      *
      * @param x The lower left x coordinate.
      * @param y The lower left y coordinate.
@@ -1325,7 +1575,7 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void addBezier312(float x1, float y1, float x2, float y2, float x3, float y3) throws IOException
     {
-    	curveTo(x1, y1, x2, y2, x3, y3);
+        curveTo(x1, y1, x2, y2, x3, y3);
     }
 
     /**
@@ -1343,22 +1593,23 @@ public final class PDPageContentStream implements Closeable
      */
     public void curveTo(float x1, float y1, float x2, float y2, float x3, float y3) throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: curveTo is not allowed within a text block.");
-    	}
-    	writeOperand(x1);
-    	writeOperand(y1);
-    	writeOperand(x2);
-    	writeOperand(y2);
-    	writeOperand(x3);
-    	writeOperand(y3);
-    	writeOperator("c");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: curveTo is not allowed within a text block.");
+        }
+        writeOperand(x1);
+        writeOperand(y1);
+        writeOperand(x2);
+        writeOperand(y2);
+        writeOperand(x3);
+        writeOperand(y3);
+        writeOperator(OperatorName.CURVE_TO);
     }
 
     /**
      * Append a cubic Bézier curve to the current path. The curve extends from the current
-     * point to the point (x3 , y3 ), using the current point and (x2 , y2 ) as the Bézier control points
+     * point to the point (x3 , y3 ), using the current point and (x2 , y2 ) as the Bézier control points/
+     *
      * @param x2 x coordinate of the point 2
      * @param y2 y coordinate of the point 2
      * @param x3 x coordinate of the point 3
@@ -1369,7 +1620,7 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void addBezier32(float x2, float y2, float x3, float y3) throws IOException
     {
-    	curveTo2(x2, y2, x3, y3);
+        curveTo2(x2, y2, x3, y3);
     }
 
     /**
@@ -1380,25 +1631,26 @@ public final class PDPageContentStream implements Closeable
      * @param y2 y coordinate of the point 2
      * @param x3 x coordinate of the point 3
      * @param y3 y coordinate of the point 3
-     * @throws IOException If the content stream could not be written.
      * @throws IllegalStateException If the method was called within a text block.
+     * @throws IOException If the content stream could not be written.
      */
     public void curveTo2(float x2, float y2, float x3, float y3) throws IOException
     {
-    	if (inTextMode)
-    	{
+        if (inTextMode)
+        {
             throw new IllegalStateException("Error: curveTo2 is not allowed within a text block.");
         }
         writeOperand(x2);
         writeOperand(y2);
         writeOperand(x3);
         writeOperand(y3);
-        writeOperator("v");
+        writeOperator(OperatorName.CURVE_TO_REPLICATE_INITIAL_POINT);
     }
 
     /**
      * Append a cubic Bézier curve to the current path. The curve extends from the current
-     * point to the point (x3 , y3 ), using (x1 , y1 ) and (x3 , y3 ) as the Bézier control points
+     * point to the point (x3 , y3 ), using (x1 , y1 ) and (x3 , y3 ) as the Bézier control points/
+     *
      * @param x1 x coordinate of the point 1
      * @param y1 y coordinate of the point 1
      * @param x3 x coordinate of the point 3
@@ -1409,7 +1661,7 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void addBezier31(float x1, float y1, float x3, float y3) throws IOException
     {
-    	curveTo1(x1, y1, x3, y3);
+        curveTo1(x1, y1, x3, y3);
     }
 
     /**
@@ -1425,15 +1677,15 @@ public final class PDPageContentStream implements Closeable
      */
     public void curveTo1(float x1, float y1, float x3, float y3) throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: curveTo1 is not allowed within a text block.");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: curveTo1 is not allowed within a text block.");
         }
         writeOperand(x1);
         writeOperand(y1);
         writeOperand(x3);
         writeOperand(y3);
-        writeOperator("y");
+        writeOperator(OperatorName.CURVE_TO_REPLICATE_FINAL_POINT);
     }
 
     /**
@@ -1452,7 +1704,7 @@ public final class PDPageContentStream implements Closeable
         }
         writeOperand(x);
         writeOperand(y);
-        writeOperator("m");
+        writeOperator(OperatorName.MOVE_TO);
     }
 
     /**
@@ -1471,7 +1723,7 @@ public final class PDPageContentStream implements Closeable
         }
         writeOperand(x);
         writeOperand(y);
-        writeOperator("l");
+        writeOperator(OperatorName.LINE_TO);
     }
 
     /**
@@ -1483,7 +1735,8 @@ public final class PDPageContentStream implements Closeable
      * @param yEnd The end y coordinate.
      * @throws IOException If there is an error while adding the line.
      * @throws IllegalStateException If the method was called within a text block.
-     * @deprecated Use {@link #moveTo} followed by {@link #lineTo}.
+     * @deprecated Use {@link #moveTo moveto(xStart,yStart)} followed by
+     * {@link #lineTo lineTo(xEnd,yEnd)}.
      */
     @Deprecated
     public void addLine(float xStart, float yStart, float xEnd, float yEnd) throws IOException
@@ -1497,7 +1750,7 @@ public final class PDPageContentStream implements Closeable
     }
 
     /**
-     * Draw a line on the page using the current non stroking color and the current line width.
+     * Draw a line on the page using the current stroking color and the current line width.
      *
      * @param xStart The start x coordinate.
      * @param yStart The start y coordinate.
@@ -1505,7 +1758,8 @@ public final class PDPageContentStream implements Closeable
      * @param yEnd The end y coordinate.
      * @throws IOException If there is an error while drawing on the screen.
      * @throws IllegalStateException If the method was called within a text block.
-     * @deprecated Use {@link #moveTo} followed by {@link #lineTo} followed by {@link #stroke}.
+     * @deprecated Use {@link #moveTo moveto(xStart,yStart)} followed by
+     * {@link #lineTo lineTo(xEnd,yEnd)} followed by {@link #stroke stroke()}.
      */
     @Deprecated
     public void drawLine(float xStart, float yStart, float xEnd, float yEnd) throws IOException
@@ -1554,7 +1808,7 @@ public final class PDPageContentStream implements Closeable
     }
 
     /**
-     * Draw a polygon on the page using the current non stroking color.
+     * Draw a polygon on the page using the current stroking color.
      * @param x x coordinate of each points
      * @param y y coordinate of each points
      * @throws IOException If there is an error while drawing on the screen.
@@ -1573,7 +1827,7 @@ public final class PDPageContentStream implements Closeable
     }
 
     /**
-     * Draw and fill a polygon on the page using the current non stroking color.
+     * Draw and fill a polygon on the page using the current stroking / non stroking colors.
      * @param x x coordinate of each points
      * @param y y coordinate of each points
      * @throws IOException If there is an error while drawing on the screen.
@@ -1593,7 +1847,7 @@ public final class PDPageContentStream implements Closeable
 
     /**
      * Stroke the path.
-     * 
+     *
      * @throws IOException If the content stream could not be written
      * @throws IllegalStateException If the method was called within a text block.
      */
@@ -1603,12 +1857,12 @@ public final class PDPageContentStream implements Closeable
         {
             throw new IllegalStateException("Error: stroke is not allowed within a text block.");
         }
-        writeOperator("S");
+        writeOperator(OperatorName.STROKE_PATH);
     }
 
     /**
      * Close and stroke the path.
-     * 
+     *
      * @throws IOException If the content stream could not be written
      * @throws IllegalStateException If the method was called within a text block.
      */
@@ -1618,12 +1872,12 @@ public final class PDPageContentStream implements Closeable
         {
             throw new IllegalStateException("Error: closeAndStroke is not allowed within a text block.");
         }
-        writeOperator("s");
+        writeOperator(OperatorName.CLOSE_AND_STROKE);
     }
 
     /**
      * Fill the path.
-     * 
+     *
      * @param windingRule the winding rule to be used for filling
      * @throws IOException If the content stream could not be written
      * @throws IllegalArgumentException If the parameter is not a valid winding rule.
@@ -1634,31 +1888,31 @@ public final class PDPageContentStream implements Closeable
     {
         if (windingRule == Path.FillType.WINDING)
         {
-        	fill();
+            fill();
         }
         else if (windingRule == Path.FillType.EVEN_ODD)
         {
-        	fillEvenOdd();
+            fillEvenOdd();
         }
         else
         {
             throw new IllegalArgumentException("Error: unknown value for winding rule");
         }
     }
-    
+
     /**
-     * Fills the path using the nonzero winding rule.
+     * Fills the path using the nonzero winding number rule.
      *
      * @throws IOException If the content stream could not be written
      * @throws IllegalStateException If the method was called within a text block.
      */
     public void fill() throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: fill is not allowed within a text block.");
-    	}
-    	writeOperator("f");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: fill is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.FILL_NON_ZERO);
     }
 
     /**
@@ -1669,13 +1923,81 @@ public final class PDPageContentStream implements Closeable
      */
     public void fillEvenOdd() throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: fill is not allowed within a text block.");
-    	}
-    	writeOperator("f*");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: fillEvenOdd is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.FILL_EVEN_ODD);
     }
-    
+
+    /**
+     * Fill and then stroke the path, using the nonzero winding number rule to determine the region
+     * to fill. This shall produce the same result as constructing two identical path objects,
+     * painting the first with {@link #fill() } and the second with {@link #stroke() }.
+     *
+     * @throws IOException If the content stream could not be written
+     * @throws IllegalStateException If the method was called within a text block.
+     */
+    public void fillAndStroke() throws IOException
+    {
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: fillAndStroke is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.FILL_NON_ZERO_AND_STROKE);
+    }
+
+    /**
+     * Fill and then stroke the path, using the even-odd rule to determine the region to
+     * fill. This shall produce the same result as constructing two identical path objects, painting
+     * the first with {@link #fillEvenOdd() } and the second with {@link #stroke() }.
+     *
+     * @throws IOException If the content stream could not be written
+     * @throws IllegalStateException If the method was called within a text block.
+     */
+    public void fillAndStrokeEvenOdd() throws IOException
+    {
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: fillAndStrokeEvenOdd is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.FILL_EVEN_ODD_AND_STROKE);
+    }
+
+    /**
+     * Close, fill, and then stroke the path, using the nonzero winding number rule to determine the
+     * region to fill. This shall have the same effect as the sequence {@link #closePath() }
+     * and then {@link #fillAndStroke() }.
+     *
+     * @throws IOException If the content stream could not be written
+     * @throws IllegalStateException If the method was called within a text block.
+     */
+    public void closeAndFillAndStroke() throws IOException
+    {
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: closeAndFillAndStroke is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.CLOSE_FILL_NON_ZERO_AND_STROKE);
+    }
+
+    /**
+     * Close, fill, and then stroke the path, using the even-odd rule to determine the region to
+     * fill. This shall have the same effect as the sequence {@link #closePath() }
+     * and then {@link #fillAndStrokeEvenOdd() }.
+     *
+     * @throws IOException If the content stream could not be written
+     * @throws IllegalStateException If the method was called within a text block.
+     */
+    public void closeAndFillAndStrokeEvenOdd() throws IOException
+    {
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: closeAndFillAndStrokeEvenOdd is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.CLOSE_FILL_EVEN_ODD_AND_STROKE);
+    }
+
     /**
      * Fills the clipping area with the given shading.
      *
@@ -1685,25 +2007,25 @@ public final class PDPageContentStream implements Closeable
      */
     public void shadingFill(PDShading shading) throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: shadingFill is not allowed within a text block.");
-    	}
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: shadingFill is not allowed within a text block.");
+        }
 
-    	writeOperand(resources.add(shading));
-    	writeOperator("sh");
+        writeOperand(resources.add(shading));
+        writeOperator(OperatorName.SHADING_FILL);
     }
 
     /**
      * Closes the current subpath.
-     * 
+     *
      * @throws IOException If the content stream could not be written
      * @deprecated Use {@link #closePath()} instead.
      */
     @Deprecated
     public void closeSubPath() throws IOException
     {
-    	closePath();
+        closePath();
     }
 
     /**
@@ -1714,18 +2036,17 @@ public final class PDPageContentStream implements Closeable
      */
     public void closePath() throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: closePath is not allowed within a text block.");
-    	}
-    	writeOperator("h");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: closePath is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.CLOSE_PATH);
     }
 
     /**
      * Clip path.
-     * 
+     *
      * @param windingRule the winding rule to be used for clipping
-     *  
      * @throws IOException If there is an error while clipping the path.
      * @throws IllegalStateException If the method was called within a text block.
      * @deprecated Use {@link #clip()} or {@link #clipEvenOdd} instead.
@@ -1739,17 +2060,17 @@ public final class PDPageContentStream implements Closeable
         }
         if (windingRule == Path.FillType.WINDING)
         {
-        	writeOperator("W");
+            writeOperator(OperatorName.CLIP_NON_ZERO);
         }
         else if (windingRule == Path.FillType.EVEN_ODD)
         {
-        	writeOperator("W");
+            writeOperator(OperatorName.CLIP_EVEN_ODD);
         }
         else
         {
             throw new IllegalArgumentException("Error: unknown value for winding rule");
         }
-        writeOperator("n");
+        writeOperator(OperatorName.ENDPATH);
     }
 
     /**
@@ -1760,13 +2081,14 @@ public final class PDPageContentStream implements Closeable
      */
     public void clip() throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: clip is not allowed within a text block.");
-    	}
-    	writeOperator("W");
-    	// end path without filling or stroking
-    	writeOperator("n");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: clip is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.CLIP_NON_ZERO);
+
+        // end path without filling or stroking
+        writeOperator(OperatorName.ENDPATH);
     }
 
     /**
@@ -1777,20 +2099,20 @@ public final class PDPageContentStream implements Closeable
      */
     public void clipEvenOdd() throws IOException
     {
-    	if (inTextMode)
-    	{
-    		throw new IllegalStateException("Error: clipEvenOdd is not allowed within a text block.");
-    	}
-    	writeOperator("W*");
-    	
-    	// end path without filling or stroking
-    	writeOperator("n");
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: clipEvenOdd is not allowed within a text block.");
+        }
+        writeOperator(OperatorName.CLIP_EVEN_ODD);
+
+        // end path without filling or stroking
+        writeOperator(OperatorName.ENDPATH);
     }
 
     /**
- * Set line width to the given value.
+     * Set line width to the given value.
      *
-     * @param lineWidth The width which is used for drwaing.
+     * @param lineWidth The width which is used for drawing.
      * @throws IOException If the content stream could not be written
      * @throws IllegalStateException If the method was called within a text block.
      */
@@ -1801,11 +2123,12 @@ public final class PDPageContentStream implements Closeable
             throw new IllegalStateException("Error: setLineWidth is not allowed within a text block.");
         }
         writeOperand(lineWidth);
-        writeOperator("w");
+        writeOperator(OperatorName.SET_LINE_WIDTH);
     }
 
     /**
      * Set the line join style.
+     *
      * @param lineJoinStyle 0 for miter join, 1 for round join, and 2 for bevel join.
      * @throws IOException If the content stream could not be written.
      * @throws IllegalStateException If the method was called within a text block.
@@ -1820,7 +2143,7 @@ public final class PDPageContentStream implements Closeable
         if (lineJoinStyle >= 0 && lineJoinStyle <= 2)
         {
             writeOperand(lineJoinStyle);
-            writeOperator("j");
+            writeOperator(OperatorName.SET_LINE_JOINSTYLE);
         }
         else
         {
@@ -1830,6 +2153,7 @@ public final class PDPageContentStream implements Closeable
 
     /**
      * Set the line cap style.
+     *
      * @param lineCapStyle 0 for butt cap, 1 for round cap, and 2 for projecting square cap.
      * @throws IOException If the content stream could not be written.
      * @throws IllegalStateException If the method was called within a text block.
@@ -1844,7 +2168,7 @@ public final class PDPageContentStream implements Closeable
         if (lineCapStyle >= 0 && lineCapStyle <= 2)
         {
             writeOperand(lineCapStyle);
-            writeOperator("J");
+            writeOperator(OperatorName.SET_LINE_CAPSTYLE);
         }
         else
         {
@@ -1854,6 +2178,7 @@ public final class PDPageContentStream implements Closeable
 
     /**
      * Set the line dash pattern.
+     *
      * @param pattern The pattern array
      * @param phase The phase of the pattern
      * @throws IOException If the content stream could not be written.
@@ -1872,12 +2197,32 @@ public final class PDPageContentStream implements Closeable
         }
         write("] ");
         writeOperand(phase);
-        writeOperator("d");
+        writeOperator(OperatorName.SET_LINE_DASHPATTERN);
+    }
+
+    /**
+     * Set the miter limit.
+     *
+     * @param miterLimit the new miter limit.
+     * @throws IOException If the content stream could not be written.
+     */
+    public void setMiterLimit(float miterLimit) throws IOException
+    {
+        if (inTextMode)
+        {
+            throw new IllegalStateException("Error: setMiterLimit is not allowed within a text block.");
+        }
+        if (miterLimit <= 0.0)
+        {
+            throw new IllegalArgumentException("A miter limit <= 0 is invalid and will not render in Acrobat Reader");
+        }
+        writeOperand(miterLimit);
+        writeOperator(OperatorName.SET_LINE_MITERLIMIT);
     }
 
     /**
      * Begin a marked content sequence.
-     * 
+     *
      * @param tag the tag
      * @throws IOException if an I/O error occurs
      * @deprecated Use {@link #beginMarkedContent} instead.
@@ -1885,7 +2230,7 @@ public final class PDPageContentStream implements Closeable
     @Deprecated
     public void beginMarkedContentSequence(COSName tag) throws IOException
     {
-    	beginMarkedContent(tag);
+        beginMarkedContent(tag);
     }
 
     /**
@@ -1897,13 +2242,13 @@ public final class PDPageContentStream implements Closeable
     public void beginMarkedContent(COSName tag) throws IOException
     {
         writeOperand(tag);
-        writeOperator("BMC");
+        writeOperator(OperatorName.BEGIN_MARKED_CONTENT);
     }
 
     /**
      * Begin a marked content sequence with a reference to an entry in the page resources'
      * Properties dictionary.
-     * 
+     *
      * @param tag the tag
      * @param propsName the properties reference
      * @throws IOException if an I/O error occurs
@@ -1914,7 +2259,7 @@ public final class PDPageContentStream implements Closeable
     {
         writeOperand(tag);
         writeOperand(propsName);
-        writeOperator("BDC");
+        writeOperator(OperatorName.BEGIN_MARKED_CONTENT_SEQ);
     }
 
     /**
@@ -1927,21 +2272,21 @@ public final class PDPageContentStream implements Closeable
      */
     public void beginMarkedContent(COSName tag, PDPropertyList propertyList) throws IOException
     {
-    	writeOperand(tag);
-    	writeOperand(resources.add(propertyList));
-    	writeOperator("BDC");
+        writeOperand(tag);
+        writeOperand(resources.add(propertyList));
+        writeOperator(OperatorName.BEGIN_MARKED_CONTENT_SEQ);
     }
 
     /**
      * End a marked content sequence.
-     * 
+     *
      * @throws IOException If the content stream could not be written
      * @deprecated Use {@link #endMarkedContent} instead.
      */
     @Deprecated
     public void endMarkedContentSequence() throws IOException
     {
-    	endMarkedContent();
+        endMarkedContent();
     }
 
     /**
@@ -1951,7 +2296,7 @@ public final class PDPageContentStream implements Closeable
      */
     public void endMarkedContent() throws IOException
     {
-    	writeOperator("EMC");
+        writeOperator(OperatorName.END_MARKED_CONTENT);
     }
 
     /**
@@ -1959,7 +2304,7 @@ public final class PDPageContentStream implements Closeable
      *
      * @param commands The commands to append to the stream.
      * @throws IOException If an error occurs while writing to the stream.
-     * @deprecated This method will be removed in a future release.
+     * @deprecated Usage of this method is discouraged.
      */
     @Deprecated
     public void appendRawCommands(String commands) throws IOException
@@ -1972,7 +2317,7 @@ public final class PDPageContentStream implements Closeable
      *
      * @param commands The commands to append to the stream.
      * @throws IOException If an error occurs while writing to the stream.
-     * @deprecated This method will be removed in a future release.
+     * @deprecated Usage of this method is discouraged.
      */
     @Deprecated
     public void appendRawCommands(byte[] commands) throws IOException
@@ -1985,7 +2330,7 @@ public final class PDPageContentStream implements Closeable
      *
      * @param data Append a raw byte to the stream.
      * @throws IOException If an error occurs while writing to the stream.
-     * @deprecated This method will be removed in a future release.
+     * @deprecated Usage of this method is discouraged.
      */
     @Deprecated
     public void appendRawCommands(int data) throws IOException
@@ -1998,12 +2343,12 @@ public final class PDPageContentStream implements Closeable
      *
      * @param data Append a formatted double value to the stream.
      * @throws IOException If an error occurs while writing to the stream.
-     * @deprecated This method will be removed in a future release.
+     * @deprecated Usage of this method is discouraged.
      */
     @Deprecated
     public void appendRawCommands(double data) throws IOException
     {
-    	output.write(formatDecimal.format(data).getBytes(Charsets.US_ASCII));
+        output.write(formatDecimal.format(data).getBytes(Charsets.US_ASCII));
     }
 
     /**
@@ -2011,20 +2356,20 @@ public final class PDPageContentStream implements Closeable
      *
      * @param data Append a formatted float value to the stream.
      * @throws IOException If an error occurs while writing to the stream.
-     * @deprecated This method will be removed in a future release.
+     * @deprecated Usage of this method is discouraged.
      */
     @Deprecated
     public void appendRawCommands(float data) throws IOException
     {
-    	output.write(formatDecimal.format(data).getBytes(Charsets.US_ASCII));
+        output.write(formatDecimal.format(data).getBytes(Charsets.US_ASCII));
     }
 
     /**
      * This will append a {@link COSName} to the content stream.
-     * 
+     *
      * @param name the name
      * @throws IOException If an error occurs while writing to the stream.
-     * @deprecated This method will be removed in a future release.
+     * @deprecated Usage of this method is discouraged.
      */
     @Deprecated
     public void appendCOSName(COSName name) throws IOException
@@ -2033,7 +2378,7 @@ public final class PDPageContentStream implements Closeable
     }
 
     /**
-     * Set an extended graphics state,
+     * Set an extended graphics state.
      *
      * @param state The extended graphics state.
      * @throws IOException If the content stream could not be written.
@@ -2041,34 +2386,68 @@ public final class PDPageContentStream implements Closeable
     public void setGraphicsStateParameters(PDExtendedGraphicsState state) throws IOException
     {
         writeOperand(resources.add(state));
-        writeOperator("gs");
+        writeOperator(OperatorName.SET_GRAPHICS_STATE_PARAMS);
     }
 
     /**
-     * Writes a real real to the content stream.
+     * Write a comment line.
+     *
+     * @param comment the comment to be added to the content stream.
+     *
+     * @throws IOException If the content stream could not be written.
+     * @throws IllegalArgumentException If the comment contains a newline. This is not allowed, because the next line
+     * could be ordinary PDF content.
      */
-    private void writeOperand(float real) throws IOException
+    public void addComment(String comment) throws IOException
     {
-    	writeOperator(formatDecimal.format(real));
-    	output.write(' ');
+        if (comment.indexOf('\n') >= 0 || comment.indexOf('\r') >= 0)
+        {
+            throw new IllegalArgumentException("comment should not include a newline");
+        }
+        output.write('%');
+        output.write(comment.getBytes(Charsets.US_ASCII));
+        output.write('\n');
     }
 
     /**
      * Writes a real number to the content stream.
+     *
+     * @param real the float value to be added to the content stream.
+     *
+     * @throws IOException if something went wrong
+     */
+    protected void writeOperand(float real) throws IOException
+    {
+        int byteCount = NumberFormatUtil.formatFloatFast(real, formatDecimal.getMaximumFractionDigits(), formatBuffer);
+
+        if (byteCount == -1)
+        {
+            //Fast formatting failed
+            write(formatDecimal.format(real));
+        }
+        else
+        {
+            output.write(formatBuffer, 0, byteCount);
+        }
+        output.write(' ');
+    }
+
+    /**
+     * Writes an integer number to the content stream.
      */
     private void writeOperand(int integer) throws IOException
     {
-    	writeOperator(formatDecimal.format(integer));
-    	output.write(' ');
+        write(formatDecimal.format(integer));
+        output.write(' ');
     }
-    
+
     /**
      * Writes a COSName to the content stream.
      */
     private void writeOperand(COSName name) throws IOException
     {
-    	name.writePDF(output);
-    	output.write(' ');
+        name.writePDF(output);
+        output.write(' ');
     }
 
     /**
@@ -2076,8 +2455,8 @@ public final class PDPageContentStream implements Closeable
      */
     private void writeOperator(String text) throws IOException
     {
-    	output.write(text.getBytes(Charsets.US_ASCII));
-    	output.write('\n');
+        output.write(text.getBytes(Charsets.US_ASCII));
+        output.write('\n');
     }
 
     /**
@@ -2085,14 +2464,15 @@ public final class PDPageContentStream implements Closeable
      */
     private void write(String text) throws IOException
     {
-    	output.write(text.getBytes(Charsets.US_ASCII));
+        output.write(text.getBytes(Charsets.US_ASCII));
     }
+
     /**
-     * Writes a string to the content stream as ASCII.
+     * Writes a newline to the content stream as ASCII.
      */
     private void writeLine() throws IOException
     {
-    	output.write('\n');
+        output.write('\n');
     }
 
     /**
@@ -2100,7 +2480,7 @@ public final class PDPageContentStream implements Closeable
      */
     private void writeBytes(byte[] data) throws IOException
     {
-    	output.write(data);
+        output.write(data);
     }
 
     /**
@@ -2108,22 +2488,31 @@ public final class PDPageContentStream implements Closeable
      */
     private void writeAffineTransform(AffineTransform transform) throws IOException
     {
-    	double[] values = new double[6];
-    	transform.getMatrix(values);
-    	for (double v : values)
-    	{
-    		writeOperand((float) v);
-    	}
+        double[] values = new double[6];
+        transform.getMatrix(values);
+        for (double v : values)
+        {
+            writeOperand((float) v);
+        }
     }
 
     /**
      * Close the content stream.  This must be called when you are done with this object.
+     *
      * @throws IOException If the underlying stream has a problem being written to.
      */
     @Override
     public void close() throws IOException
     {
-    	output.close();
+        if (inTextMode)
+        {
+            Log.w("PdfBox-Android", "You did not call endText(), some viewers won't display your text");
+        }
+        if (output != null)
+        {
+            output.close();
+            output = null;
+        }
     }
 
     private boolean isOutside255Interval(int val)
@@ -2134,5 +2523,101 @@ public final class PDPageContentStream implements Closeable
     private boolean isOutsideOneInterval(double val)
     {
         return val < 0 || val > 1;
+    }
+
+    private void setStrokingColorSpaceStack(PDColorSpace colorSpace)
+    {
+        if (strokingColorSpaceStack.isEmpty())
+        {
+            strokingColorSpaceStack.add(colorSpace);
+        }
+        else
+        {
+            strokingColorSpaceStack.setElementAt(colorSpace, strokingColorSpaceStack.size() - 1);
+        }
+    }
+
+    private void setNonStrokingColorSpaceStack(PDColorSpace colorSpace)
+    {
+        if (nonStrokingColorSpaceStack.isEmpty())
+        {
+            nonStrokingColorSpaceStack.add(colorSpace);
+        }
+        else
+        {
+            nonStrokingColorSpaceStack.setElementAt(colorSpace, nonStrokingColorSpaceStack.size() - 1);
+        }
+    }
+
+    /**
+     * Set the text rendering mode. This determines whether showing text shall cause glyph outlines
+     * to be stroked, filled, used as a clipping boundary, or some combination of the three.
+     *
+     * @param rm The text rendering mode.
+     * @throws IOException If the content stream could not be written.
+     */
+    public void setRenderingMode(RenderingMode rm) throws IOException
+    {
+        writeOperand(rm.intValue());
+        writeOperator(OperatorName.SET_TEXT_RENDERINGMODE);
+    }
+
+    /**
+     * Set the character spacing. The value shall be added to the horizontal or vertical component
+     * of the glyph's displacement, depending on the writing mode.
+     *
+     * @param spacing character spacing
+     * @throws IOException If the content stream could not be written.
+     */
+    public void setCharacterSpacing(float spacing) throws IOException
+    {
+        writeOperand(spacing);
+        writeOperator(OperatorName.SET_CHAR_SPACING);
+    }
+
+    /**
+     * Set the word spacing. The value shall be added to the horizontal or vertical component of the
+     * ASCII SPACE character, depending on the writing mode.
+     * <p>
+     * This will have an effect only with Type1 and TrueType fonts, not with Type0 fonts. The PDF
+     * specification tells why: "Word spacing shall be applied to every occurrence of the
+     * single-byte character code 32 in a string when using a simple font or a composite font that
+     * defines code 32 as a single-byte code. It shall not apply to occurrences of the byte value 32
+     * in multiple-byte codes."
+     *
+     * @param spacing word spacing
+     * @throws IOException If the content stream could not be written.
+     */
+    public void setWordSpacing(float spacing) throws IOException
+    {
+        writeOperand(spacing);
+        writeOperator(OperatorName.SET_WORD_SPACING);
+    }
+
+    /**
+     * Set the horizontal scaling to scale / 100.
+     *
+     * @param scale number specifying the percentage of the normal width. Default value: 100 (normal
+     * width).
+     * @throws IOException If the content stream could not be written.
+     */
+    public void setHorizontalScaling(float scale) throws IOException
+    {
+        writeOperand(scale);
+        writeOperator(OperatorName.SET_TEXT_HORIZONTAL_SCALING);
+    }
+
+    /**
+     * Set the text rise value, i.e. move the baseline up or down. This is useful for drawing
+     * superscripts or subscripts.
+     *
+     * @param rise Specifies the distance, in unscaled text space units, to move the baseline up or
+     * down from its default location. 0 restores the default location.
+     * @throws IOException
+     */
+    public void setTextRise(float rise) throws IOException
+    {
+        writeOperand(rise);
+        writeOperator(OperatorName.SET_TEXT_RISE);
     }
 }

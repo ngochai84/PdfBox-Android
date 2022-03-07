@@ -1,18 +1,20 @@
 /*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+
+   Licensed to the Apache Software Foundation (ASF) under one or more
+   contributor license agreements.  See the NOTICE file distributed with
+   this work for additional information regarding copyright ownership.
+   The ASF licenses this file to You under the Apache License, Version 2.0
+   (the "License"); you may not use this file except in compliance with
+   the License.  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
  */
 package com.tom_roush.pdfbox.rendering;
 
@@ -33,7 +35,7 @@ import com.tom_roush.pdfbox.pdmodel.font.PDType0Font;
 import com.tom_roush.pdfbox.pdmodel.font.PDVectorFont;
 
 /**
- * This class provides a glyph to GeneralPath conversion for TrueType and OpenType fonts.
+ * This class provides a glyph to Path conversion for TrueType and OpenType fonts.
  */
 final class TTFGlyph2D implements Glyph2D
 {
@@ -109,16 +111,19 @@ final class TTFGlyph2D implements Glyph2D
      * @param gid the GID
      * @param code the character code
      *
-     * @return the GeneralPath for the given glyphId
+     * @return the Path for the given glyphId
      */
     public Path getPathForGID(int gid, int code) throws IOException
     {
-        Path glyphPath;
-        if (glyphs.containsKey(gid))
+        if (gid == 0 && !isCIDFont && code == 10 && font.isStandard14())
         {
-            glyphPath = glyphs.get(gid);
+            // PDFBOX-4001 return empty path for line feed on std14
+            // need to catch this early because all "bad" glyphs have gid 0
+            Log.w("PdfBox-Android", "No glyph for code " + code + " in font " + font.getName());
+            return new Path();
         }
-        else
+        Path glyphPath = glyphs.get(gid);
+        if (glyphPath == null)
         {
             if (gid == 0 || gid >= ttf.getMaximumProfile().getNumGlyphs())
             {
@@ -126,7 +131,7 @@ final class TTFGlyph2D implements Glyph2D
                 {
                     int cid = ((PDType0Font) font).codeToCID(code);
                     String cidHex = String.format("%04x", cid);
-                    Log.w("PdfBox-Android", "No glyph for " + code + " (CID " + cidHex + ") in font " +
+                    Log.w("PdfBox-Android", "No glyph for code " + code + " (CID " + cidHex + ") in font " +
                         font.getName());
                 }
                 else
@@ -134,17 +139,20 @@ final class TTFGlyph2D implements Glyph2D
                     Log.w("PdfBox-Android", "No glyph for " + code + " in font " + font.getName());
                 }
             }
+
             Path glyph = vectorFont.getPath(code);
+
             // Acrobat only draws GID 0 for embedded or "Standard 14" fonts, see PDFBOX-2372
             if (gid == 0 && !font.isEmbedded() && !font.isStandard14())
             {
                 glyph = null;
             }
+
             if (glyph == null)
             {
                 // empty glyph (e.g. space, newline)
                 glyphPath = new Path();
-                glyphs.put(gid, glyphPath);
+//                glyphs.put(gid, glyphPath); TODO: PdfBox-Android
             }
             else
             {
@@ -154,10 +162,11 @@ final class TTFGlyph2D implements Glyph2D
                     AffineTransform atScale = AffineTransform.getScaleInstance(scale, scale);
                     glyphPath.transform(atScale.toMatrix());
                 }
-                glyphs.put(gid, glyphPath);
+//                glyphs.put(gid, glyphPath); TODO: PdfBox-Android
             }
         }
-        return glyphPath != null ? new Path(glyphPath) : null; // todo: expensive
+        // todo: expensive
+        return new Path(glyphPath);
     }
 
     @Override

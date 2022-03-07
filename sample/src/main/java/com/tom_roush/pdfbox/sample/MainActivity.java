@@ -1,15 +1,10 @@
 package com.tom_roush.pdfbox.sample;
 
-import android.Manifest;
 import android.app.Activity;
-import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
-import android.os.Environment;
-import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.ContextCompat;
 import android.util.Log;
 import android.view.Menu;
 import android.view.View;
@@ -36,17 +31,18 @@ import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory;
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory;
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDAcroForm;
-import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckbox;
+import com.tom_roush.pdfbox.pdmodel.interactive.form.PDCheckBox;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDComboBox;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDField;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDListBox;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDRadioButton;
 import com.tom_roush.pdfbox.pdmodel.interactive.form.PDTextField;
+import com.tom_roush.pdfbox.rendering.ImageType;
 import com.tom_roush.pdfbox.rendering.PDFRenderer;
 import com.tom_roush.pdfbox.text.PDFTextStripper;
-import com.tom_roush.pdfbox.util.PDFBoxResourceLoader;
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 
-import org.spongycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 
 public class MainActivity extends Activity {
     File root;
@@ -77,21 +73,13 @@ public class MainActivity extends Activity {
      * Initializes variables used for convenience
      */
     private void setup() {
-        // Enable Android-style asset loading (highly recommended)
+        // Enable Android asset loading
         PDFBoxResourceLoader.init(getApplicationContext());
         // Find the root of the external storage.
-        root = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+
+        root = getApplicationContext().getCacheDir();
         assetManager = getAssets();
         tv = (TextView) findViewById(R.id.statusTextView);
-
-        // Need to ask for write permissions on SDK 23 and up, this is ignored on older versions
-        if (ContextCompat.checkSelfPermission(MainActivity.this,
-            Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
-        {
-
-            ActivityCompat.requestPermissions(MainActivity.this,
-                new String[] {Manifest.permission.WRITE_EXTERNAL_STORAGE}, 1);
-        }
     }
 
     /**
@@ -173,7 +161,7 @@ public class MainActivity extends Activity {
             // Create a renderer for the document
             PDFRenderer renderer = new PDFRenderer(document);
             // Render the image to an RGB Bitmap
-            pageImage = renderer.renderImage(0, 1, Bitmap.Config.RGB_565);
+            pageImage = renderer.renderImage(0, 1, ImageType.RGB);
 
             // Save the render result to an image
             String path = root.getAbsolutePath() + "/render.jpg";
@@ -208,7 +196,7 @@ public class MainActivity extends Activity {
             field.setReadOnly(true);
 
             PDField checkbox = acroForm.getField("Checkbox");
-            ((PDCheckbox) checkbox).check();
+            ((PDCheckBox) checkbox).check();
 
             PDField radio = acroForm.getField("Radio");
             ((PDRadioButton)radio).setValue("Second");

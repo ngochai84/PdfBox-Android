@@ -19,15 +19,16 @@ package com.tom_roush.pdfbox.cos;
 import android.util.Log;
 
 import java.io.Closeable;
-import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.tom_roush.pdfbox.io.IOUtils;
 import com.tom_roush.pdfbox.io.ScratchFile;
 import com.tom_roush.pdfbox.pdfparser.PDFObjectStreamParser;
+import com.tom_roush.pdfbox.pdmodel.PDDocument;
 
 /**
  * This is the in-memory representation of the PDF document.  You need to call
@@ -38,6 +39,7 @@ import com.tom_roush.pdfbox.pdfparser.PDFObjectStreamParser;
  */
 public class COSDocument extends COSBase implements Closeable
 {
+
     private float version = 1.4f;
 
     /**
@@ -54,6 +56,11 @@ public class COSDocument extends COSBase implements Closeable
         new HashMap<COSObjectKey, Long>();
 
     /**
+     * List containing all streams which are created when creating a new pdf. 
+     */
+    private final List<COSStream> streams = new ArrayList<COSStream>();
+
+    /**
      * Document trailer dictionary.
      */
     private COSDictionary trailer;
@@ -61,7 +68,7 @@ public class COSDocument extends COSBase implements Closeable
     private boolean warnMissingClose = true;
 
     /**
-     * Signal that document is already decrypted.
+     * Signal that document is already decrypted. 
      */
     private boolean isDecrypted = false;
 
@@ -74,58 +81,28 @@ public class COSDocument extends COSBase implements Closeable
     private ScratchFile scratchFile;
 
     /**
-     * Constructor.
-     *
-     * @param useScratchFiles enables the usage of a scratch file if set to true
-     *
+     * Used for incremental saving, to avoid XRef object numbers from being reused.
      */
-    public COSDocument(boolean useScratchFiles)
-    {
-        this((File) null, useScratchFiles);
-    }
+    private long highestXRefObjectNumber;
 
     /**
-     * Constructor that will use a temporary file in the given directory
-     * for storage of the PDF streams. The temporary file is automatically
-     * removed when this document gets closed.
-     *
-     * @param scratchDir directory for the temporary file,
-     *                   or <code>null</code> to use the system default
-     * @param useScratchFiles enables the usage of a scratch file if set to true
-     *
+     * Constructor. Uses main memory to buffer PDF streams.
      */
-    public COSDocument(File scratchDir, boolean useScratchFiles)
+    public COSDocument()
     {
-        if (useScratchFiles)
-        {
-            try
-            {
-                scratchFile = new ScratchFile(scratchDir);
-            }
-            catch (IOException e)
-            {
-                Log.e("PdfBox-Android", "Can't create temp file, using memory buffer instead", e);
-            }
-        }
+        this(ScratchFile.getMainMemoryOnlyInstance());
     }
 
     /**
      * Constructor that will use the provide memory handler for storage of the
      * PDF streams.
      *
-     * @param scratchFile memory handler for storage of PDF streams
+     * @param scratchFile memory handler for buffering of PDF streams
+     *
      */
     public COSDocument(ScratchFile scratchFile)
     {
         this.scratchFile = scratchFile;
-    }
-
-    /**
-     * Constructor. Uses memory to store stream.
-     */
-    public COSDocument()
-    {
-        this(false);
     }
 
     /**
@@ -135,7 +112,12 @@ public class COSDocument extends COSBase implements Closeable
      */
     public COSStream createCOSStream()
     {
-        return new COSStream(scratchFile);
+        COSStream stream = new COSStream(scratchFile);
+        // collect all COSStreams so that they can be closed when closing the COSDocument.
+        // This is limited to newly created pdfs as all COSStreams of an existing pdf are
+        // collected within the map objectPool
+        streams.add(stream);
+        return stream;
     }
 
     /**
@@ -163,7 +145,7 @@ public class COSDocument extends COSBase implements Closeable
      * @return This will return an object with the specified type.
      * @throws IOException If there is an error getting the object
      */
-    public COSObject getObjectByType( COSName type ) throws IOException
+    public COSObject getObjectByType(COSName type) throws IOException
     {
         for( COSObject object : objectPool.values() )
         {
@@ -288,7 +270,6 @@ public class COSDocument extends COSBase implements Closeable
      */
     public void setVersion( float versionValue )
     {
-        // update header string
         version = versionValue;
     }
 
@@ -313,7 +294,7 @@ public class COSDocument extends COSBase implements Closeable
     /**
      * Indicates if a encrypted pdf is already decrypted after parsing.
      *
-     * @return true indicates that the pdf is decrypted.
+     *  @return true indicates that the pdf is decrypted.
      */
     public boolean isDecrypted()
     {
@@ -328,22 +309,22 @@ public class COSDocument extends COSBase implements Closeable
     public boolean isEncrypted()
     {
         boolean encrypted = false;
-        if( trailer != null )
+        if (trailer != null)
         {
-            encrypted = trailer.getDictionaryObject( COSName.ENCRYPT ) != null;
+            encrypted = trailer.getDictionaryObject(COSName.ENCRYPT) instanceof COSDictionary;
         }
         return encrypted;
     }
 
     /**
-     * This will get the encryption dictionary if the document is encrypted or null
-     * if the document is not encrypted.
+     * This will get the encryption dictionary if the document is encrypted or null if the document
+     * is not encrypted.
      *
      * @return The encryption dictionary.
      */
     public COSDictionary getEncryptionDictionary()
     {
-        return (COSDictionary)trailer.getDictionaryObject( COSName.ENCRYPT );
+        return trailer.getCOSDictionary(COSName.ENCRYPT);
     }
 
     /**
@@ -364,7 +345,7 @@ public class COSDocument extends COSBase implements Closeable
      */
     public COSArray getDocumentID()
     {
-        return (COSArray) getTrailer().getDictionaryObject(COSName.ID);
+        return getTrailer().getCOSArray(COSName.ID);
     }
 
     /**
@@ -380,11 +361,11 @@ public class COSDocument extends COSBase implements Closeable
     /**
      * This will get the document catalog.
      *
-     * Maybe this should move to an object at PDFEdit level
-     *
-     * @return catalog is the root of all document activities
+     * @return The catalog is the root of the document; never null.
      *
      * @throws IOException If no catalog can be found.
+     *
+     * @deprecated use {@link PDDocument#getDocumentCatalog()} instead.
      */
     public COSObject getCatalog() throws IOException
     {
@@ -399,7 +380,7 @@ public class COSDocument extends COSBase implements Closeable
     /**
      * This will get a list of all available objects.
      *
-     * @return A list of all objects.
+     * @return A list of all objects, never null.
      */
     public List<COSObject> getObjects()
     {
@@ -428,6 +409,28 @@ public class COSDocument extends COSBase implements Closeable
     }
 
     /**
+     * Internal PDFBox use only. Get the object number of the highest XRef stream. This is needed to
+     * avoid reusing such a number in incremental saving.
+     *
+     * @return The object number of the highest XRef stream, or 0 if there was no XRef stream.
+     */
+    public long getHighestXRefObjectNumber()
+    {
+        return highestXRefObjectNumber;
+    }
+
+    /**
+     * Internal PDFBox use only. Sets the object number of the highest XRef stream. This is needed
+     * to avoid reusing such a number in incremental saving.
+     *
+     * @param highestXRefObjectNumber The object number of the highest XRef stream.
+     */
+    public void setHighestXRefObjectNumber(long highestXRefObjectNumber)
+    {
+        this.highestXRefObjectNumber = highestXRefObjectNumber;
+    }
+
+    /**
      * visitor pattern double dispatch method.
      *
      * @param visitor The object to notify when visiting this object.
@@ -450,30 +453,45 @@ public class COSDocument extends COSBase implements Closeable
     {
         if (!closed)
         {
+            // Make sure that:
+            // - first Exception is kept
+            // - all COSStreams are closed
+            // - ScratchFile is closed
+            // - there's a way to see which errors occured
+
+            IOException firstException = null;
+
             // close all open I/O streams
-            List<COSObject> list = getObjects();
-            if (list != null)
+            for (COSObject object : getObjects())
             {
-                for (COSObject object : list)
+                COSBase cosObject = object.getObject();
+                if (cosObject instanceof COSStream)
                 {
-                    COSBase cosObject = object.getObject();
-                    if (cosObject instanceof COSStream)
-                    {
-                        ((COSStream)cosObject).close();
-                    }
+                    firstException = IOUtils.closeAndLogException((COSStream) cosObject, "COSStream", firstException);
                 }
             }
-
+            for (COSStream stream : streams)
+            {
+                firstException = IOUtils.closeAndLogException(stream, "COSStream", firstException);
+            }
             if (scratchFile != null)
             {
-                scratchFile.close();
+                firstException = IOUtils.closeAndLogException(scratchFile, "ScratchFile", firstException);
             }
             closed = true;
+
+            // rethrow first exception to keep method contract
+            if (firstException != null)
+            {
+                throw firstException;
+            }
         }
     }
 
     /**
      * Returns true if this document has been closed.
+     *
+     * @return true if the documnet has been closed.
      */
     public boolean isClosed()
     {
@@ -529,8 +547,8 @@ public class COSDocument extends COSBase implements Closeable
                 COSObjectKey key = new COSObjectKey(next);
                 if (objectPool.get(key) == null || objectPool.get(key).getObject() == null
                     // xrefTable stores negated objNr of objStream for objects in objStreams
-                    || (xrefTable.containsKey(key) &&
-                    xrefTable.get(key) == -objStream.getObjectNumber()))
+                    || (xrefTable.containsKey(key)
+                    && xrefTable.get(key) == -objStream.getObjectNumber()))
                 {
                     COSObject obj = getObjectFromPool(key);
                     obj.setObject(next.getObject());
@@ -600,7 +618,7 @@ public class COSDocument extends COSBase implements Closeable
     }
 
     /**
-     * This method set the startxref value of the document. This will only
+     * This method set the startxref value of the document. This will only 
      * be needed for incremental updates.
      *
      * @param startXrefValue the value for startXref
@@ -631,7 +649,8 @@ public class COSDocument extends COSBase implements Closeable
     }
 
     /**
-     * Sets isXRefStream to the given value.
+     * Sets isXRefStream to the given value. You need to take care that the version of your PDF is
+     * 1.5 or higher.
      *
      * @param isXRefStreamValue the new value for isXRefStream
      */

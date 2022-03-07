@@ -20,13 +20,16 @@ import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.Charset;
 import java.util.Calendar;
 import java.util.GregorianCalendar;
 import java.util.TimeZone;
 
+import com.tom_roush.fontbox.util.Charsets;
+
 /**
  * An interface into a data stream.
- * 
+ *
  * @author Ben Litchfield
  */
 abstract class TTFDataStream implements Closeable
@@ -37,7 +40,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read a 16.16 fixed value, where the first 16 bits are the decimal and the last 16 bits are the fraction.
-     * 
+     *
      * @return A 32 bit value.
      * @throws IOException If there is an error reading the data.
      */
@@ -51,19 +54,19 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read a fixed length ascii string.
-     * 
+     *
      * @param length The length of the string to read.
      * @return A string of the desired length.
      * @throws IOException If there is an error reading the data.
      */
     public String readString(int length) throws IOException
     {
-        return readString(length, "ISO-8859-1");
+        return readString(length, Charsets.ISO_8859_1);
     }
 
     /**
-     * Read a fixed length ascii string.
-     * 
+     * Read a fixed length string.
+     *
      * @param length The length of the string to read in bytes.
      * @param charset The expected character set of the string.
      * @return A string of the desired length.
@@ -76,8 +79,21 @@ abstract class TTFDataStream implements Closeable
     }
 
     /**
+     * Read a fixed length string.
+     *
+     * @param length The length of the string to read in bytes.
+     * @param charset The expected character set of the string.
+     * @return A string of the desired length.
+     * @throws IOException If there is an error reading the data.
+     */
+    public String readString(int length, Charset charset) throws IOException
+    {
+        byte[] buffer = read(length);
+        return new String(buffer, charset);
+    }
+    /**
      * Read an unsigned byte.
-     * 
+     *
      * @return An unsigned byte.
      * @throws IOException If there is an error reading the data.
      */
@@ -85,7 +101,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read an unsigned byte.
-     * 
+     *
      * @return An unsigned byte.
      * @throws IOException If there is an error reading the data.
      */
@@ -93,19 +109,19 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read a signed byte.
-     * 
+     *
      * @return A signed byte.
      * @throws IOException If there is an error reading the data.
      */
     public int readSignedByte() throws IOException
     {
         int signedByte = read();
-        return signedByte < 127 ? signedByte : signedByte - 256;
+        return signedByte <= 127 ? signedByte : signedByte - 256;
     }
 
     /**
      * Read a unsigned byte. Similar to {@link #read()}, but throws an exception if EOF is unexpectedly reached.
-     * 
+     *
      * @return A unsigned byte.
      * @throws IOException If there is an error reading the data.
      */
@@ -121,7 +137,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read an unsigned integer.
-     * 
+     *
      * @return An unsiged integer.
      * @throws IOException If there is an error reading the data.
      */
@@ -140,7 +156,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read an unsigned short.
-     * 
+     *
      * @return An unsigned short.
      * @throws IOException If there is an error reading the data.
      */
@@ -148,7 +164,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read an unsigned byte array.
-     * 
+     *
      * @param length the length of the array to be read
      * @return An unsigned byte array.
      * @throws IOException If there is an error reading the data.
@@ -165,7 +181,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read an unsigned short array.
-     * 
+     *
      * @param length The length of the array to read.
      * @return An unsigned short array.
      * @throws IOException If there is an error reading the data.
@@ -182,7 +198,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read an signed short.
-     * 
+     *
      * @return An signed short.
      * @throws IOException If there is an error reading the data.
      */
@@ -190,7 +206,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read an eight byte international date.
-     * 
+     *
      * @return An signed short.
      * @throws IOException If there is an error reading the data.
      */
@@ -212,12 +228,12 @@ abstract class TTFDataStream implements Closeable
      */
     public String readTag() throws IOException
     {
-        return new String(read(4), "US-ASCII");
+        return new String(read(4), Charsets.US_ASCII);
     }
 
     /**
      * Close the underlying resources.
-     * 
+     *
      * @throws IOException If there is an error closing the resources.
      */
     @Override
@@ -225,7 +241,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Seek into the datasource.
-     * 
+     *
      * @param pos The position to seek to.
      * @throws IOException If there is an error seeking to that position.
      */
@@ -233,7 +249,7 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * Read a specific number of bytes from the stream.
-     * 
+     *
      * @param numberOfBytes The number of bytes to read.
      * @return The byte buffer.
      * @throws IOException If there is an error while reading.
@@ -245,7 +261,7 @@ abstract class TTFDataStream implements Closeable
         int totalAmountRead = 0;
         // read at most numberOfBytes bytes from the stream.
         while (totalAmountRead < numberOfBytes
-                && (amountRead = read(data, totalAmountRead, numberOfBytes - totalAmountRead)) != -1)
+            && (amountRead = read(data, totalAmountRead, numberOfBytes - totalAmountRead)) != -1)
         {
             totalAmountRead += amountRead;
         }
@@ -261,20 +277,20 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * @see java.io.InputStream#read(byte[], int, int )
-     * 
+     *
      * @param b The buffer to write to.
      * @param off The offset into the buffer.
      * @param len The length into the buffer.
-     * 
+     *
      * @return The number of bytes read, or -1 at the end of the stream
-     * 
+     *
      * @throws IOException If there is an error reading from the stream.
      */
     public abstract int read(byte[] b, int off, int len) throws IOException;
 
     /**
      * Get the current position in the stream.
-     * 
+     *
      * @return The current position in the stream.
      * @throws IOException If an error occurs while reading the stream.
      */
@@ -282,10 +298,17 @@ abstract class TTFDataStream implements Closeable
 
     /**
      * This will get the original data file that was used for this stream.
-     * 
+     *
      * @return The data that was read from.
      * @throws IOException If there is an issue reading the data.
      */
     public abstract InputStream getOriginalData() throws IOException;
 
+    /**
+     * This will get the original data size that was used for this stream.
+     *
+     * @return The size of the original data.
+     * @throws IOException If there is an issue reading the data.
+     */
+    public abstract long getOriginalDataSize();
 }

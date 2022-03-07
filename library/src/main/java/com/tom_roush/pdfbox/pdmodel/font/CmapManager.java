@@ -31,8 +31,8 @@ import com.tom_roush.fontbox.cmap.CMapParser;
 final class CMapManager
 {
     static Map<String, CMap> cMapCache =
-            Collections.synchronizedMap(new HashMap<String, CMap>());
-    
+        Collections.synchronizedMap(new HashMap<String, CMap>());
+
     private CMapManager()
     {
     }
@@ -41,6 +41,8 @@ final class CMapManager
      * Fetches the predefined CMap from disk (or cache).
      *
      * @param cMapName CMap name
+     * @return The predefined CMap, never null.
+     * @throws IOException
      */
     public static CMap getPredefinedCMap(String cMapName) throws IOException
     {

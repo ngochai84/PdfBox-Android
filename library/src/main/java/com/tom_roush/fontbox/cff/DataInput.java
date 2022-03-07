@@ -19,9 +19,11 @@ package com.tom_roush.fontbox.cff;
 import java.io.EOFException;
 import java.io.IOException;
 
+import com.tom_roush.fontbox.util.Charsets;
+
 /**
  * This class contains some functionality to read a byte buffer.
- * 
+ *
  * @author Villu Ruusmann
  */
 public class DataInput
@@ -66,14 +68,14 @@ public class DataInput
         bufferPosition = position;
     }
 
-    /** 
+    /**
      * Returns the buffer as an ISO-8859-1 string.
      * @return the buffer as string
      * @throws IOException if an error occurs during reading
      */
     public String getString() throws IOException
     {
-        return new String(inputBuffer, "ISO-8859-1");
+        return new String(inputBuffer, Charsets.ISO_8859_1);
     }
 
     /**
@@ -83,7 +85,16 @@ public class DataInput
      */
     public byte readByte() throws IOException
     {
-        return (byte) readUnsignedByte();
+        try
+        {
+            byte value = inputBuffer[bufferPosition];
+            bufferPosition++;
+            return value;
+        }
+        catch (RuntimeException re)
+        {
+            return -1;
+        }
     }
 
     /**
@@ -168,11 +179,13 @@ public class DataInput
      */
     public byte[] readBytes(int length) throws IOException
     {
-        byte[] bytes = new byte[length];
-        for (int i = 0; i < length; i++)
+        if (inputBuffer.length - bufferPosition < length)
         {
-            bytes[i] = readByte();
+            throw new EOFException();
         }
+        byte[] bytes = new byte[length];
+        System.arraycopy(inputBuffer, bufferPosition, bytes, 0, length);
+        bufferPosition += length;
         return bytes;
     }
 
@@ -183,7 +196,7 @@ public class DataInput
             int value = inputBuffer[bufferPosition] & 0xff;
             bufferPosition++;
             return value;
-        } 
+        }
         catch (RuntimeException re)
         {
             return -1;
@@ -194,17 +207,16 @@ public class DataInput
     {
         try
         {
-            int value = inputBuffer[bufferPosition + offset] & 0xff;
-            return value;
+            return inputBuffer[bufferPosition + offset] & 0xff;
         }
         catch (RuntimeException re)
         {
             return -1;
         }
     }
-    
+
     public int length()
     {
-    	return inputBuffer.length;
+        return inputBuffer.length;
     }
 }

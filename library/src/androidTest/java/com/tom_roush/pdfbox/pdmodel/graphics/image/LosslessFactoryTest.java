@@ -19,22 +19,27 @@ import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
-import android.support.test.InstrumentationRegistry;
+import android.os.Build;
 
+import androidx.test.filters.FlakyTest;
+import androidx.test.platform.app.InstrumentationRegistry;
+
+import java.io.File;
+import java.io.IOException;
+
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
+import com.tom_roush.pdfbox.android.TestResourceGenerator;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.pdmodel.PDPage;
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream;
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceGray;
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB;
 import com.tom_roush.pdfbox.rendering.PDFRenderer;
-import com.tom_roush.pdfbox.util.PDFBoxResourceLoader;
 
 import org.junit.Before;
 import org.junit.Test;
-
-import java.io.File;
-import java.io.IOException;
 
 import static com.tom_roush.pdfbox.pdmodel.graphics.image.ValidateXImage.checkIdent;
 import static com.tom_roush.pdfbox.pdmodel.graphics.image.ValidateXImage.colorCount;
@@ -43,6 +48,7 @@ import static com.tom_roush.pdfbox.pdmodel.graphics.image.ValidateXImage.validat
 import static junit.framework.Assert.assertEquals;
 import static junit.framework.Assert.assertNotNull;
 import static junit.framework.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 /**
  * Unit tests for LosslessFactory
@@ -59,8 +65,7 @@ public class LosslessFactoryTest
     {
         testContext = InstrumentationRegistry.getInstrumentation().getContext();
         PDFBoxResourceLoader.init(testContext);
-        testResultsDir = new File(android.os.Environment.getExternalStorageDirectory() +
-            "/Download/pdfbox-test-output/graphics/");
+        testResultsDir = new File(testContext.getCacheDir(), "pdfbox-test-output/graphics/");
         testResultsDir.mkdirs();
     }
 
@@ -88,6 +93,7 @@ public class LosslessFactoryTest
         Canvas canvas = new Canvas();
         canvas.setBitmap(grayImage);
         Paint paint = new Paint();
+        paint.setColor(Color.TRANSPARENT);
         canvas.drawBitmap(image, 0, 0, paint);
         PDImageXObject ximage2 = LosslessFactory.createFromImage(document, grayImage);
         validate(ximage2, 8, grayImage.getWidth(), grayImage.getHeight(), "png",
@@ -112,7 +118,8 @@ public class LosslessFactoryTest
         // if something goes wrong in the future and we want to have a PDF to open.
         PDPage page = new PDPage();
         document.addPage(page);
-        PDPageContentStream contentStream = new PDPageContentStream(document, page, true, false);
+        PDPageContentStream contentStream = new PDPageContentStream(document, page,
+            PDPageContentStream.AppendMode.APPEND, false);
         contentStream.drawImage(ximage1, 200, 300, ximage1.getWidth() / 2, ximage1.getHeight() / 2);
         contentStream.drawImage(ximage2, 200, 450, ximage2.getWidth() / 2, ximage2.getHeight() / 2);
 //        contentStream.drawImage(ximage3, 200, 600, ximage3.getWidth() / 2, ximage3.getHeight() / 2);
@@ -228,6 +235,26 @@ public class LosslessFactoryTest
     // TODO: PdfBox-Android : testCreateLosslessFromTransparentGIF: GIF images not currently supported
 
     /**
+     * Test file that had a predictor encoding bug in PDFBOX-4184.
+     *
+     * @throws java.io.IOException
+     */
+    @Test
+    public void testCreateLosslessFromGovdocs032163() throws IOException
+    {
+        File inDir = new File(testContext.getCacheDir(), "imgs");
+        inDir.mkdirs();
+        File imageFile = TestResourceGenerator.downloadTestResource(inDir, "PDFBOX-4184-032163.jpg",
+            "https://issues.apache.org/jira/secure/attachment/12949710/032163.jpg");
+        assumeTrue(imageFile.exists());
+        PDDocument document = new PDDocument();
+        Bitmap image = BitmapFactory.decodeFile(imageFile.getAbsolutePath());
+        PDImageXObject ximage = LosslessFactory.createFromImage(document, image);
+        validate(ximage, 8, image.getWidth(), image.getHeight(), "png", PDDeviceRGB.INSTANCE.getName());
+        checkIdent(image, ximage.getImage());
+    }
+
+    /**
      * Check whether the RGB part of images are identical.
      *
      * @param expectedImage
@@ -266,4 +293,59 @@ public class LosslessFactoryTest
     }
 
     // doBitmaskTransparencyTest: Android does not have bitmask transparency
+
+    /**
+     * Test lossless encoding of CMYK images
+     */
+//    public void testCreateLosslessFromImageCMYK() throws IOException TODO: PdfBox-Android
+
+//    public void testCreateLosslessFrom16Bit() throws IOException TODO: PdfBox-Android
+
+//    public void testCreateLosslessFromImageINT_BGR() throws IOException TODO: PdfBox-Android
+
+//    public void testCreateLosslessFromImageINT_RGB() throws IOException TODO: PdfBox-Android
+
+//    public void testCreateLosslessFromImageBYTE_3BGR() throws IOException TODO: PdfBox-Android
+
+    @FlakyTest(detail = "Behavior depends heavily on API level / device")
+    @Test
+    public void testCreateLosslessFrom16BitPNG() throws IOException
+    {
+        // TODO: PdfBox-Android PNG is reduced to 8 bit, this causes changes in test values
+        PDDocument document = new PDDocument();
+        File TARGETDIR = new File(testContext.getCacheDir(), "imgs");
+        TARGETDIR.mkdirs();
+        File imgFile = TestResourceGenerator.downloadTestResource(TARGETDIR, "PDFBOX-4184-16bit.png", "https://issues.apache.org/jira/secure/attachment/12929821/16bit.png");
+        assumeTrue(imgFile.exists());
+        Bitmap image = BitmapFactory.decodeFile(imgFile.getAbsolutePath());
+        Bitmap compareImage;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+        {
+            // TODO: PdfBox-Android This is a workaround for RGBA_16 failing the checkIdent calls
+            compareImage = image.copy(Bitmap.Config.ARGB_8888, false);
+        }
+        else
+        {
+            compareImage = image;
+        }
+
+//        assertEquals(64, image.getColorModel().getPixelSize());
+//        assertEquals(Transparency.TRANSLUCENT, image.getColorModel().getTransparency());
+//        assertEquals(4, image.getRaster().getNumDataElements());
+//        assertEquals(java.awt.image.DataBuffer.TYPE_USHORT, image.getRaster().getDataBuffer().getDataType());
+
+        PDImageXObject ximage = LosslessFactory.createFromImage(document, image);
+
+        int w = image.getWidth();
+        int h = image.getHeight();
+        validate(ximage, 8, w, h, "png", PDDeviceRGB.INSTANCE.getName());
+        checkIdent(compareImage, ximage.getImage());
+        checkIdentRGB(compareImage, ximage.getOpaqueImage());
+
+        assertNotNull(ximage.getSoftMask());
+        validate(ximage.getSoftMask(), 8, w, h, "png", PDDeviceGray.INSTANCE.getName());
+//        assertEquals(35, colorCount(ximage.getSoftMask().getImage())); TODO: PdfBox-Android
+
+        doWritePDF(document, ximage, testResultsDir, "png16bit.pdf");
+    }
 }

@@ -33,6 +33,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * This table is specified only in the OpenType specification (1.3 and later).
  *
  * @author Glenn Adams
+ *
  */
 public class VerticalOriginTable extends TTFTable
 {
@@ -43,7 +44,7 @@ public class VerticalOriginTable extends TTFTable
 
     private float version;
     private int defaultVertOriginY;
-    private Map<Integer, Integer> origins = new ConcurrentHashMap<Integer, Integer>();
+    private Map<Integer, Integer> origins;
 
     VerticalOriginTable(TrueTypeFont font)
     {
@@ -58,11 +59,12 @@ public class VerticalOriginTable extends TTFTable
      * @throws IOException If there is an error reading the data.
      */
     @Override
-    public void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
+    void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
     {
         version = data.read32Fixed();
         defaultVertOriginY = data.readSignedShort();
         int numVertOriginYMetrics = data.readUnsignedShort();
+        origins = new ConcurrentHashMap<Integer, Integer>(numVertOriginYMetrics);
         for (int i = 0; i < numVertOriginYMetrics; ++i)
         {
             int g = data.readUnsignedShort();

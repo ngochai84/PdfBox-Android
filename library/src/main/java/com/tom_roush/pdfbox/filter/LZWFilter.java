@@ -17,13 +17,6 @@ package com.tom_roush.pdfbox.filter;
 
 import android.util.Log;
 
-import com.tom_roush.harmony.javax.imageio.stream.MemoryCacheImageInputStream;
-import com.tom_roush.harmony.javax.imageio.stream.MemoryCacheImageOutputStream;
-import com.tom_roush.pdfbox.cos.COSDictionary;
-import com.tom_roush.pdfbox.cos.COSName;
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
@@ -31,6 +24,11 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+
+import com.tom_roush.harmony.javax.imageio.stream.MemoryCacheImageInputStream;
+import com.tom_roush.harmony.javax.imageio.stream.MemoryCacheImageOutputStream;
+import com.tom_roush.pdfbox.cos.COSDictionary;
+import com.tom_roush.pdfbox.cos.COSName;
 
 /**
  *
@@ -50,7 +48,7 @@ public class LZWFilter extends Filter
      * The LZW end of data code.
      */
     public static final long EOD = 257;
-    
+
     //BEWARE: codeTable must be local to each method, because there is only
     // one instance of each filter
 
@@ -59,38 +57,17 @@ public class LZWFilter extends Filter
      */
     @Override
     public DecodeResult decode(InputStream encoded, OutputStream decoded,
-            COSDictionary parameters, int index) throws IOException
+        COSDictionary parameters, int index) throws IOException
     {
-        int predictor = -1;
-        int earlyChange = 1;
-
         COSDictionary decodeParams = getDecodeParams(parameters, index);
-        if (decodeParams != null)
+        int earlyChange = decodeParams.getInt(COSName.EARLY_CHANGE, 1);
+
+        if (earlyChange != 0 && earlyChange != 1)
         {
-            predictor = decodeParams.getInt(COSName.PREDICTOR);
-            earlyChange = decodeParams.getInt(COSName.EARLY_CHANGE, 1);
-            if (earlyChange != 0 && earlyChange != 1)
-            {
-                earlyChange = 1;
-            }
+            earlyChange = 1;
         }
-        if (predictor > 1)
-        {
-            int colors = Math.min(decodeParams.getInt(COSName.COLORS, 1), 32);
-            int bitsPerPixel = decodeParams.getInt(COSName.BITS_PER_COMPONENT, 8);
-            int columns = decodeParams.getInt(COSName.COLUMNS, 1);
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            doLZWDecode(encoded, baos, earlyChange);
-            ByteArrayInputStream bais = new ByteArrayInputStream(baos.toByteArray());
-            Predictor.decodePredictor(predictor, colors, bitsPerPixel, columns, bais, decoded);
-            decoded.flush();
-            baos.reset();
-            bais.reset();
-        }
-        else
-        {
-            doLZWDecode(encoded, decoded, earlyChange);
-        }
+
+        doLZWDecode(encoded, Predictor.wrapPredictor(decoded, decodeParams), earlyChange);
         return new DecodeResult(parameters);
     }
 
@@ -121,6 +98,7 @@ public class LZWFilter extends Filter
                         decoded.write(data);
                         if (prevCommand != -1)
                         {
+                            checkIndexBounds(codeTable, prevCommand, in);
                             data = codeTable.get((int) prevCommand);
                             byte[] newData = Arrays.copyOf(data, data.length + 1);
                             newData[data.length] = firstByte;
@@ -129,13 +107,14 @@ public class LZWFilter extends Filter
                     }
                     else
                     {
+                        checkIndexBounds(codeTable, prevCommand, in);
                         byte[] data = codeTable.get((int) prevCommand);
                         byte[] newData = Arrays.copyOf(data, data.length + 1);
                         newData[data.length] = data[0];
                         decoded.write(newData);
                         codeTable.add(newData);
                     }
-                    
+
                     chunk = calculateChunk(codeTable.size(), earlyChange);
                     prevCommand = nextCommand;
                 }
@@ -143,9 +122,25 @@ public class LZWFilter extends Filter
         }
         catch (EOFException ex)
         {
-        	Log.w("PdfBox-Android", "Premature EOF in LZW stream, EOD code missing");
+            Log.w("PdfBox-Android", "Premature EOF in LZW stream, EOD code missing");
         }
         decoded.flush();
+    }
+
+    private void checkIndexBounds(List<byte[]> codeTable, long index, MemoryCacheImageInputStream in)
+        throws IOException
+    {
+        if (index < 0)
+        {
+            throw new IOException("negative array index: " + index + " near offset "
+                + in.getStreamPosition());
+        }
+        if (index >= codeTable.size())
+        {
+            throw new IOException("array index overflow: " + index +
+                " >= " + codeTable.size() + " near offset "
+                + in.getStreamPosition());
+        }
     }
 
     /**
@@ -153,7 +148,7 @@ public class LZWFilter extends Filter
      */
     @Override
     protected void encode(InputStream rawData, OutputStream encoded, COSDictionary parameters)
-            throws IOException
+        throws IOException
     {
         List<byte[]> codeTable = createCodeTable();
         int chunk = 9;
@@ -168,7 +163,7 @@ public class LZWFilter extends Filter
             byte by = (byte) r;
             if (inputPattern == null)
             {
-            	inputPattern = new byte[] { by };
+                inputPattern = new byte[] { by };
                 foundCode = by & 0xff;
             }
             else
@@ -214,6 +209,7 @@ public class LZWFilter extends Filter
         chunk = calculateChunk(codeTable.size(), 1);
 
         out.writeBits(EOD, chunk);
+
         // pad with 0
         out.writeBits(0, 7);
 
@@ -242,19 +238,19 @@ public class LZWFilter extends Filter
                 if (foundCode != -1)
                 {
                     // we already found pattern with size > 1
-                	return foundCode;
+                    return foundCode;
                 }
                 else if (pattern.length > 1)
                 {
                     // we won't find anything here anyway
-                	return -1;
+                    return -1;
                 }
             }
             byte[] tryPattern = codeTable.get(i);
             if ((foundCode != -1 || tryPattern.length > foundLen) && Arrays.equals(tryPattern, pattern))
             {
-            	foundCode = i;
-            	foundLen = tryPattern.length;
+                foundCode = i;
+                foundLen = tryPattern.length;
             }
         }
         return foundCode;
@@ -269,7 +265,7 @@ public class LZWFilter extends Filter
         List<byte[]> codeTable = new ArrayList<byte[]>(4096);
         for (int i = 0; i < 256; ++i)
         {
-        	codeTable.add(new byte[] { (byte) (i & 0xFF) });
+            codeTable.add(new byte[] { (byte) (i & 0xFF) });
         }
         codeTable.add(null); // 256 EOD
         codeTable.add(null); // 257 CLEAR_TABLE

@@ -46,7 +46,7 @@ public final class Operator
         theOperator = aOperator;
         if( aOperator.startsWith( "/" ) )
         {
-            throw new IllegalArgumentException("Operators are not allowed to start with / '" + aOperator + "'");
+            throw new IllegalArgumentException( "Operators are not allowed to start with / '" + aOperator + "'" );
         }
     }
 
@@ -60,7 +60,8 @@ public final class Operator
     public static Operator getOperator( String operator )
     {
         Operator operation;
-        if( operator.equals( "ID" ) || operator.equals( "BI" ) )
+        if (operator.equals(OperatorName.BEGIN_INLINE_IMAGE_DATA)
+            || OperatorName.BEGIN_INLINE_IMAGE.equals(operator))
         {
             //we can't cache the ID operators.
             operation = new Operator( operator );

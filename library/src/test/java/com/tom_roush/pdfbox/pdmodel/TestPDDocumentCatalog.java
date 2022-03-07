@@ -16,15 +16,16 @@
  */
 package com.tom_roush.pdfbox.pdmodel;
 
-import com.tom_roush.pdfbox.pdmodel.graphics.color.PDOutputIntent;
-
-import org.junit.Test;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
 
+import com.tom_roush.pdfbox.cos.COSName;
+import com.tom_roush.pdfbox.pdmodel.graphics.color.PDOutputIntent;
+import org.junit.Test;
+
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 /**
@@ -157,7 +158,7 @@ public class TestPDDocumentCatalog
             assertTrue(outputIntents.isEmpty());
 
             // add an OutputIntent
-            colorProfile = TestPDDocumentCatalog.class.getResourceAsStream("/pdfbox/com/tom_roush/pdfbox/pdmodel/sRGB Color Space Profile.icm");
+            colorProfile = TestPDDocumentCatalog.class.getResourceAsStream("/pdfbox/com/tom_roush/pdfbox/pdmodel/sRGB.icc");
             // create output intent
             PDOutputIntent oi = new PDOutputIntent(doc, colorProfile);
             oi.setInfo("sRGB IEC61966-2.1");
@@ -188,5 +189,14 @@ public class TestPDDocumentCatalog
                 colorProfile.close();
             }
         }
+    }
+
+    @Test
+    public void handleBooleanInOpenAction() throws IOException
+    {
+        //PDFBOX-3772 -- allow for COSBoolean
+        PDDocument doc = new PDDocument();
+        doc.getDocumentCatalog().getCOSObject().setBoolean(COSName.OPEN_ACTION, false);
+        assertNull(doc.getDocumentCatalog().getOpenAction());
     }
 }

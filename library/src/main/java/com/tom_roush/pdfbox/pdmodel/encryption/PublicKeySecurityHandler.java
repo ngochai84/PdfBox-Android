@@ -14,6 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.tom_roush.pdfbox.pdmodel.encryption;
 
 import java.io.ByteArrayOutputStream;
@@ -24,13 +25,12 @@ import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
 import java.security.InvalidKeyException;
 import java.security.KeyStoreException;
-import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.SecureRandom;
-import java.security.Security;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
+import java.util.Collection;
 import java.util.Iterator;
 
 import javax.crypto.BadPaddingException;
@@ -41,34 +41,35 @@ import javax.crypto.NoSuchPaddingException;
 import javax.crypto.SecretKey;
 
 import com.tom_roush.pdfbox.cos.COSArray;
+import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.cos.COSString;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 
-import org.spongycastle.asn1.ASN1InputStream;
-import org.spongycastle.asn1.ASN1ObjectIdentifier;
-import org.spongycastle.asn1.ASN1Primitive;
-import org.spongycastle.asn1.ASN1Set;
-import org.spongycastle.asn1.DEROctetString;
-import org.spongycastle.asn1.DEROutputStream;
-import org.spongycastle.asn1.DERSet;
-import org.spongycastle.asn1.cms.ContentInfo;
-import org.spongycastle.asn1.cms.EncryptedContentInfo;
-import org.spongycastle.asn1.cms.EnvelopedData;
-import org.spongycastle.asn1.cms.IssuerAndSerialNumber;
-import org.spongycastle.asn1.cms.KeyTransRecipientInfo;
-import org.spongycastle.asn1.cms.RecipientIdentifier;
-import org.spongycastle.asn1.cms.RecipientInfo;
-import org.spongycastle.asn1.pkcs.PKCSObjectIdentifiers;
-import org.spongycastle.asn1.x509.AlgorithmIdentifier;
-import org.spongycastle.asn1.x509.TBSCertificateStructure;
-import org.spongycastle.cert.X509CertificateHolder;
-import org.spongycastle.cms.CMSEnvelopedData;
-import org.spongycastle.cms.CMSException;
-import org.spongycastle.cms.KeyTransRecipientId;
-import org.spongycastle.cms.RecipientId;
-import org.spongycastle.cms.RecipientInformation;
-import org.spongycastle.cms.jcajce.JceKeyTransEnvelopedRecipient;
-import org.spongycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.asn1.ASN1Encoding;
+import org.bouncycastle.asn1.ASN1InputStream;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.ASN1OutputStream;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.ASN1Set;
+import org.bouncycastle.asn1.DEROctetString;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.ContentInfo;
+import org.bouncycastle.asn1.cms.EncryptedContentInfo;
+import org.bouncycastle.asn1.cms.EnvelopedData;
+import org.bouncycastle.asn1.cms.IssuerAndSerialNumber;
+import org.bouncycastle.asn1.cms.KeyTransRecipientInfo;
+import org.bouncycastle.asn1.cms.RecipientIdentifier;
+import org.bouncycastle.asn1.cms.RecipientInfo;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+import org.bouncycastle.asn1.x509.TBSCertificate;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cms.CMSEnvelopedData;
+import org.bouncycastle.cms.CMSException;
+import org.bouncycastle.cms.KeyTransRecipientId;
+import org.bouncycastle.cms.RecipientId;
+import org.bouncycastle.cms.RecipientInformation;
+import org.bouncycastle.cms.jcajce.JceKeyTransEnvelopedRecipient;
 
 /**
  * This class implements the public key security handler described in the PDF specification.
@@ -81,7 +82,8 @@ public final class PublicKeySecurityHandler extends SecurityHandler
     /** The filter name. */
     public static final String FILTER = "Adobe.PubSec";
 
-    private static final String SUBFILTER = "adbe.pkcs7.s4";
+    private static final String SUBFILTER4 = "adbe.pkcs7.s4";
+    private static final String SUBFILTER5 = "adbe.pkcs7.s5";
 
     private PublicKeyProtectionPolicy policy = null;
 
@@ -140,40 +142,49 @@ public final class PublicKeySecurityHandler extends SecurityHandler
         {
             boolean foundRecipient = false;
 
+            X509Certificate certificate = material.getCertificate();
+            X509CertificateHolder materialCert = null;
+            if (certificate != null)
+            {
+                materialCert = new X509CertificateHolder(certificate.getEncoded());
+            }
+
             // the decrypted content of the enveloped data that match
             // the certificate in the decryption material provided
             byte[] envelopedData = null;
 
             // the bytes of each recipient in the recipients array
-            byte[][] recipientFieldsBytes = new byte[encryption.getRecipientsLength()][];
+            COSArray array = (COSArray) encryption.getCOSObject().getItem(COSName.RECIPIENTS);
+            if (array == null)
+            {
+                PDCryptFilterDictionary defaultCryptFilterDictionary = encryption.getDefaultCryptFilterDictionary();
+                array = (COSArray) defaultCryptFilterDictionary.getCOSObject().getItem(COSName.RECIPIENTS);
+            }
+            byte[][] recipientFieldsBytes = new byte[array.size()][];
+            //TODO encryption.getRecipientsLength() and getRecipientStringAt() should be deprecated
 
             int recipientFieldsLength = 0;
-            int i = 0;
             StringBuilder extraInfo = new StringBuilder();
-            for (; i < encryption.getRecipientsLength(); i++)
+            for (int i = 0; i < array.size(); i++)
             {
-                COSString recipientFieldString = encryption.getRecipientStringAt(i);
+                COSString recipientFieldString = (COSString) array.getObject(i);
                 byte[] recipientBytes = recipientFieldString.getBytes();
                 CMSEnvelopedData data = new CMSEnvelopedData(recipientBytes);
-                Iterator<?> recipCertificatesIt = data.getRecipientInfos().getRecipients().iterator();
+                Collection<RecipientInformation> recipCertificatesIt = data.getRecipientInfos()
+                    .getRecipients();
                 int j = 0;
-                while (recipCertificatesIt.hasNext())
+                for (RecipientInformation ri : recipCertificatesIt)
                 {
-                    RecipientInformation ri = (RecipientInformation) recipCertificatesIt.next();
                     // Impl: if a matching certificate was previously found it is an error,
                     // here we just don't care about it
-                    X509Certificate certificate = material.getCertificate();
-                    X509CertificateHolder materialCert = null;
-                    if (null != certificate)
-                    {
-                        materialCert = new X509CertificateHolder(certificate.getEncoded());
-                    }
                     RecipientId rid = ri.getRID();
-                    if (rid.match(materialCert) && !foundRecipient)
+                    if (!foundRecipient && rid.match(materialCert))
                     {
                         foundRecipient = true;
                         PrivateKey privateKey = (PrivateKey) material.getPrivateKey();
-                        envelopedData = ri.getContent(new JceKeyTransEnvelopedRecipient(privateKey).setProvider("SC"));
+                        // might need to call setContentProvider() if we use PKI token, see
+                        // http://bouncy-castle.1462172.n4.nabble.com/CMSException-exception-unwrapping-key-key-invalid-unknown-key-type-passed-to-RSA-td4658109.html
+                        envelopedData = ri.getContent(new JceKeyTransEnvelopedRecipient(privateKey));
                         break;
                     }
                     j++;
@@ -193,7 +204,7 @@ public final class PublicKeySecurityHandler extends SecurityHandler
             }
             if (!foundRecipient || envelopedData == null)
             {
-                throw new IOException("The certificate matches none of " + i
+                throw new IOException("The certificate matches none of " + array.size()
                     + " recipient entries" + extraInfo.toString());
             }
             if (envelopedData.length != 24)
@@ -226,8 +237,26 @@ public final class PublicKeySecurityHandler extends SecurityHandler
                 sha1InputOffset += recipientFieldsByte.length;
             }
 
-            MessageDigest md = MessageDigests.getSHA1();
-            byte[] mdResult = md.digest(sha1Input);
+            byte[] mdResult;
+            if (encryption.getVersion() == 4 || encryption.getVersion() == 5)
+            {
+                mdResult = MessageDigests.getSHA256().digest(sha1Input);
+
+                // detect whether AES encryption is used. This assumes that the encryption algo is 
+                // stored in the PDCryptFilterDictionary
+                // However, crypt filters are used only when V is 4 or 5.
+                PDCryptFilterDictionary defaultCryptFilterDictionary = encryption.getDefaultCryptFilterDictionary();
+                if (defaultCryptFilterDictionary != null)
+                {
+                    COSName cryptFilterMethod = defaultCryptFilterDictionary.getCryptFilterMethod();
+                    setAES(COSName.AESV2.equals(cryptFilterMethod) ||
+                        COSName.AESV3.equals(cryptFilterMethod));
+                }
+            }
+            else
+            {
+                mdResult = MessageDigests.getSHA1().digest(sha1Input);
+            }
 
             // we have the encryption key ...
             encryptionKey = new byte[this.keyLength / 8];
@@ -281,14 +310,8 @@ public final class PublicKeySecurityHandler extends SecurityHandler
     @Override
     public void prepareDocumentForEncryption(PDDocument doc) throws IOException
     {
-        if (keyLength == 256)
-        {
-            throw new IOException("256 bit key length is not supported yet for public key security");
-        }
         try
         {
-            Security.addProvider(new BouncyCastleProvider());
-
             PDEncryption dictionary = doc.getEncryption();
             if (dictionary == null)
             {
@@ -297,15 +320,13 @@ public final class PublicKeySecurityHandler extends SecurityHandler
 
             dictionary.setFilter(FILTER);
             dictionary.setLength(this.keyLength);
-            dictionary.setVersion(2);
+            int version = computeVersionNumber();
+            dictionary.setVersion(version);
 
             // remove CF, StmF, and StrF entries that may be left from a previous encryption
             dictionary.removeV45filters();
 
-            dictionary.setSubFilter(SUBFILTER);
-
             // create the 20 bytes seed
-
             byte[] seed = new byte[20];
 
             KeyGenerator key;
@@ -321,49 +342,99 @@ public final class PublicKeySecurityHandler extends SecurityHandler
 
             key.init(192, new SecureRandom());
             SecretKey sk = key.generateKey();
-            System.arraycopy(sk.getEncoded(), 0, seed, 0, 20); // create the 20 bytes seed
 
+            // create the 20 bytes seed
+            System.arraycopy(sk.getEncoded(), 0, seed, 0, 20);
 
-            byte[][] recipientsField = computeRecipientsField(seed);
+            byte[][] recipientsFields = computeRecipientsField(seed);
 
-            dictionary.setRecipients(recipientsField);
+            int shaInputLength = seed.length;
 
-            int sha1InputLength = seed.length;
-
-            for(int j=0; j<dictionary.getRecipientsLength(); j++)
+            for (byte[] field : recipientsFields)
             {
-                COSString string = dictionary.getRecipientStringAt(j);
-                sha1InputLength += string.getBytes().length;
+                shaInputLength += field.length;
             }
 
-            byte[] sha1Input = new byte[sha1InputLength];
+            byte[] shaInput = new byte[shaInputLength];
 
-            System.arraycopy(seed, 0, sha1Input, 0, 20);
+            System.arraycopy(seed, 0, shaInput, 0, 20);
 
-            int sha1InputOffset = 20;
+            int shaInputOffset = 20;
 
-            for(int j=0; j<dictionary.getRecipientsLength(); j++)
+            for (byte[] recipientsField : recipientsFields)
             {
-                COSString string = dictionary.getRecipientStringAt(j);
-                System.arraycopy(
-                    string.getBytes(), 0,
-                    sha1Input, sha1InputOffset, string.getBytes().length);
-                sha1InputOffset += string.getBytes().length;
+                System.arraycopy(recipientsField, 0, shaInput, shaInputOffset, recipientsField.length);
+                shaInputOffset += recipientsField.length;
             }
 
-            MessageDigest sha1 = MessageDigests.getSHA1();
-            byte[] mdResult = sha1.digest(sha1Input);
+            byte[] mdResult;
+            if (version == 4 || version == 5)
+            {
+                dictionary.setSubFilter(SUBFILTER5);
+                mdResult = MessageDigests.getSHA256().digest(shaInput);
+                COSName aesVName = version == 5 ? COSName.AESV3 : COSName.AESV2;
+                prepareEncryptionDictAES(dictionary, aesVName, recipientsFields);
+            }
+            else
+            {
+                dictionary.setSubFilter(SUBFILTER4);
+                mdResult = MessageDigests.getSHA1().digest(shaInput);
+                dictionary.setRecipients(recipientsFields);
+            }
 
             this.encryptionKey = new byte[this.keyLength/8];
             System.arraycopy(mdResult, 0, this.encryptionKey, 0, this.keyLength/8);
 
             doc.setEncryptionDictionary(dictionary);
-            doc.getDocument().setEncryptionDictionary(dictionary.getCOSDictionary());
+            doc.getDocument().setEncryptionDictionary(dictionary.getCOSObject());
         }
         catch(GeneralSecurityException e)
         {
             throw new IOException(e);
         }
+    }
+
+    /**
+     * Computes the version number of the StandardSecurityHandler based on the encryption key
+     * length. See PDF Spec 1.6 p 93 and
+     * <a href="https://www.adobe.com/content/dam/acom/en/devnet/pdf/adobe_supplement_iso32000.pdf">PDF
+     * 1.7 Supplement ExtensionLevel: 3</a>
+     *
+     * @return The computed version number.
+     */
+    private int computeVersionNumber()
+    {
+        switch (keyLength)
+        {
+            case 40:
+                return 1;
+            case 128:
+                return 2; // prefer RC4 (AES 128 doesn't work yet)
+            //return 4; // prefer AES
+            case 256:
+                return 5;
+            default:
+                throw new IllegalArgumentException("key length must be 40, 128 or 256");
+        }
+    }
+
+    private void prepareEncryptionDictAES(PDEncryption encryptionDictionary, COSName aesVName, byte[][] recipients)
+    {
+        PDCryptFilterDictionary cryptFilterDictionary = new PDCryptFilterDictionary();
+        cryptFilterDictionary.setCryptFilterMethod(aesVName);
+        cryptFilterDictionary.setLength(keyLength);
+        COSArray array = new COSArray();
+        for (byte[] recipient : recipients)
+        {
+            array.add(new COSString(recipient));
+        }
+        cryptFilterDictionary.getCOSObject().setItem(COSName.RECIPIENTS, array);
+        array.setDirect(true);
+        encryptionDictionary.setDefaultCryptFilterDictionary(cryptFilterDictionary);
+        encryptionDictionary.setStreamFilterName(COSName.DEFAULT_CRYPT_FILTER);
+        encryptionDictionary.setStringFilterName(COSName.DEFAULT_CRYPT_FILTER);
+        cryptFilterDictionary.getCOSObject().setDirect(true);
+        setAES(true);
     }
 
     private byte[][] computeRecipientsField(byte[] seed) throws GeneralSecurityException, IOException
@@ -395,7 +466,7 @@ public final class PublicKeySecurityHandler extends SecurityHandler
 
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
 
-            DEROutputStream k = new DEROutputStream(baos);
+            ASN1OutputStream k = ASN1OutputStream.create(baos, ASN1Encoding.DER);
 
             k.writeObject(obj);
 
@@ -409,20 +480,21 @@ public final class PublicKeySecurityHandler extends SecurityHandler
     private ASN1Primitive createDERForRecipient(byte[] in, X509Certificate cert)
         throws IOException, GeneralSecurityException
     {
-        String algorithm = "1.2.840.113549.3.2";
+        String algorithm = PKCSObjectIdentifiers.RC2_CBC.getId();
         AlgorithmParameterGenerator apg;
         KeyGenerator keygen;
         Cipher cipher;
         try
         {
-            apg = AlgorithmParameterGenerator.getInstance(algorithm);
-            keygen = KeyGenerator.getInstance(algorithm, "SC");
-            cipher = Cipher.getInstance(algorithm, "SC");
+            apg = AlgorithmParameterGenerator.getInstance(algorithm, SecurityProvider.getProvider());
+            keygen = KeyGenerator.getInstance(algorithm, SecurityProvider.getProvider());
+            cipher = Cipher.getInstance(algorithm, SecurityProvider.getProvider());
         }
         catch (NoSuchAlgorithmException e)
         {
-            // should never happen, if this happens throw IOException instead
-            throw new RuntimeException("Could not find a suitable javax.crypto provider", e);
+            // happens when using the command line app .jar file
+            throw new IOException("Could not find a suitable javax.crypto provider for algorithm " +
+                algorithm + "; possible reason: using an unsigned .jar file", e);
         }
         catch (NoSuchPaddingException e)
         {
@@ -459,7 +531,7 @@ public final class PublicKeySecurityHandler extends SecurityHandler
         BadPaddingException, IllegalBlockSizeException
     {
         ASN1InputStream input = new ASN1InputStream(x509certificate.getTBSCertificate());
-        TBSCertificateStructure certificate = TBSCertificateStructure.getInstance(input.readObject());
+        TBSCertificate certificate = TBSCertificate.getInstance(input.readObject());
         input.close();
 
         AlgorithmIdentifier algorithmId = certificate.getSubjectPublicKeyInfo().getAlgorithm();
@@ -471,7 +543,8 @@ public final class PublicKeySecurityHandler extends SecurityHandler
         Cipher cipher;
         try
         {
-            cipher = Cipher.getInstance(algorithmId.getAlgorithm().getId());
+            cipher = Cipher.getInstance(algorithmId.getAlgorithm().getId(),
+                SecurityProvider.getProvider());
         }
         catch (NoSuchAlgorithmException e)
         {

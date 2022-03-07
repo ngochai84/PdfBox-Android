@@ -30,14 +30,12 @@ import com.tom_roush.pdfbox.cos.COSName;
  * @author Ben Litchfield
  * @author John Hewson
  */
-public final class PDDeviceRGB extends PDDeviceColorSpace {
-    /**
-     * This is the single instance of this class.
-     */
+public final class PDDeviceRGB extends PDDeviceColorSpace
+{
+    /**  This is the single instance of this class. */
     public static final PDDeviceRGB INSTANCE = new PDDeviceRGB();
 
-    private final PDColor initialColor = new PDColor(new float[]{0, 0, 0}, this);
-
+    private final PDColor initialColor = new PDColor(new float[] { 0, 0, 0 }, this);
 //    private volatile ColorSpace awtColorSpace;
 
     private PDDeviceRGB()
@@ -71,35 +69,43 @@ public final class PDDeviceRGB extends PDDeviceColorSpace {
     }
 
     @Override
-    public String getName() {
+    public String getName()
+    {
         return COSName.DEVICERGB.getName();
     }
 
     /**
-     * @inheritDoc
+     * {@inheritDoc}
      */
-    public int getNumberOfComponents() {
+    @Override
+    public int getNumberOfComponents()
+    {
         return 3;
     }
 
     @Override
-    public float[] getDefaultDecode(int bitsPerComponent) {
-        return new float[]{0, 1, 0, 1, 0, 1};
+    public float[] getDefaultDecode(int bitsPerComponent)
+    {
+        return new float[] { 0, 1, 0, 1, 0, 1 };
     }
 
     @Override
-    public PDColor getInitialColor() {
+    public PDColor getInitialColor()
+    {
         return initialColor;
     }
 
     @Override
-    public float[] toRGB(float[] value) {
+    public float[] toRGB(float[] value)
+    {
         // This is just assuming that the values being sent to it are already in RGB color space.
-        if (value.length == 3) {
+        if (value.length == 3)
+        {
             return value;
-        } else {
-//            init();
-//            return awtColorSpace.toRGB(value);
+        }
+        else
+        {
+//            TODO: PdfBox-Android
             return initialColor.getComponents();
         }
     }
@@ -113,10 +119,6 @@ public final class PDDeviceRGB extends PDDeviceColorSpace {
         }
         return raster;
 
-//        inti();
-//        ColorModel colorModel = new ComponentColorModel(awtColorSpace,
-//                false, false, Transparency.OPAQUE, raster.getDataBuffer().getDataType());
-//
-//        return new BufferedImage(colorModel, raster, false, null); TODO: PdfBox-Android
+        // TODO: PdfBox-Android use color model
     }
 }

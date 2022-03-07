@@ -20,36 +20,40 @@ import java.io.IOException;
 
 /**
  * A table in a true type font.
- * 
+ *
  * @author Ben Litchfield
  */
 public class IndexToLocationTable extends TTFTable
 {
     private static final short SHORT_OFFSETS = 0;
     private static final short LONG_OFFSETS = 1;
-    
+
     /**
      * A tag that identifies this table type.
      */
     public static final String TAG = "loca";
-    
+
     private long[] offsets;
 
     IndexToLocationTable(TrueTypeFont font)
     {
         super(font);
     }
-    
+
     /**
      * This will read the required data from the stream.
-     * 
+     *
      * @param ttf The font that is being read.
      * @param data The stream to read the data from.
      * @throws IOException If there is an error reading the data.
      */
-    public void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
+    void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
     {
         HeaderTable head = ttf.getHeader();
+        if (head == null)
+        {
+            throw new IOException("Could not get head table");
+        }
         int numGlyphs = ttf.getNumberOfGlyphs();
         offsets = new long[ numGlyphs +1];
         for( int i=0; i<numGlyphs+1; i++ )

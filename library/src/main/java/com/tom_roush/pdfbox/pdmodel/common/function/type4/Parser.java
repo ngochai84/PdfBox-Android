@@ -19,6 +19,7 @@ package com.tom_roush.pdfbox.pdmodel.common.function.type4;
 /**
  * Parser for PDF Type 4 functions. This implements a small subset of the PostScript
  * language but is no full PostScript interpreter.
+ *
  */
 public final class Parser
 {
@@ -86,21 +87,21 @@ public final class Parser
     {
 
         /** {@inheritDoc} */
-    	@Override
+        @Override
         public void comment(CharSequence text)
         {
             //nop
         }
 
         /** {@inheritDoc} */
-    	@Override
+        @Override
         public void newLine(CharSequence text)
         {
             //nop
         }
 
         /** {@inheritDoc} */
-    	@Override
+        @Override
         public void whitespace(CharSequence text)
         {
             //nop
@@ -174,21 +175,21 @@ public final class Parser
             char ch = currentChar();
             switch (ch)
             {
-            case CR:
-            case LF:
-            case FF: //FF
-                state = State.NEWLINE;
-                break;
-            case NUL:
-            case TAB:
-            case SPACE:
-                state = State.WHITESPACE;
-                break;
-            case '%':
-                state = State.COMMENT;
-                break;
-            default:
-                state = State.TOKEN;
+                case CR:
+                case LF:
+                case FF: //FF
+                    state = State.NEWLINE;
+                    break;
+                case NUL:
+                case TAB:
+                case SPACE:
+                    state = State.WHITESPACE;
+                    break;
+                case '%':
+                    state = State.COMMENT;
+                    break;
+                default:
+                    state = State.TOKEN;
             }
             return state;
         }
@@ -201,17 +202,17 @@ public final class Parser
                 nextState();
                 switch (state)
                 {
-                case NEWLINE:
-                    scanNewLine();
-                    break;
-                case WHITESPACE:
-                    scanWhitespace();
-                    break;
-                case COMMENT:
-                    scanComment();
-                    break;
-                default:
-                    scanToken();
+                    case NEWLINE:
+                        scanNewLine();
+                        break;
+                    case WHITESPACE:
+                        scanWhitespace();
+                        break;
+                    case COMMENT:
+                        scanComment();
+                        break;
+                    default:
+                        scanToken();
                 }
             }
         }
@@ -223,8 +224,8 @@ public final class Parser
             buffer.append(ch);
             if (ch == CR && peek() == LF)
             {
-            	//CRLF is treated as one newline
-            	buffer.append(nextChar());
+                //CRLF is treated as one newline
+                buffer.append(nextChar());
             }
             handler.newLine(buffer);
             nextChar();
@@ -240,13 +241,13 @@ public final class Parser
                 char ch = nextChar();
                 switch (ch)
                 {
-                case NUL:
-                case TAB:
-                case SPACE:
-                    buffer.append(ch);
-                    break;
-                default:
-                    break loop;
+                    case NUL:
+                    case TAB:
+                    case SPACE:
+                        buffer.append(ch);
+                        break;
+                    default:
+                        break loop;
                 }
             }
             handler.whitespace(buffer);
@@ -262,12 +263,12 @@ public final class Parser
                 char ch = nextChar();
                 switch (ch)
                 {
-                case CR:
-                case LF:
-                case FF:
-                    break loop;
-                default:
-                    buffer.append(ch);
+                    case CR:
+                    case LF:
+                    case FF:
+                        break loop;
+                    default:
+                        buffer.append(ch);
                 }
             }
             //EOF reached
@@ -281,13 +282,13 @@ public final class Parser
             buffer.append(ch);
             switch (ch)
             {
-            case '{':
-            case '}':
-                handler.token(buffer);
-                nextChar();
-                return;
-            default:
-                //continue
+                case '{':
+                case '}':
+                    handler.token(buffer);
+                    nextChar();
+                    return;
+                default:
+                    //continue
             }
             loop:
             while (hasMore())
@@ -295,18 +296,18 @@ public final class Parser
                 ch = nextChar();
                 switch (ch)
                 {
-                case NUL:
-                case TAB:
-                case SPACE:
-                case CR:
-                case LF:
-                case FF:
-                case EOT:
-                case '{':
-                case '}':
-                    break loop;
-                default:
-                    buffer.append(ch);
+                    case NUL:
+                    case TAB:
+                    case SPACE:
+                    case CR:
+                    case LF:
+                    case FF:
+                    case EOT:
+                    case '{':
+                    case '}':
+                        break loop;
+                    default:
+                        buffer.append(ch);
                 }
             }
             //EOF reached

@@ -109,11 +109,19 @@ public final class PDColor
 
     /**
      * Returns the components of this color value.
-     * @return the components of this color value
+     * @return the components of this color value, never null.
      */
     public float[] getComponents()
     {
-        return components.clone();
+        if (/*colorSpace instanceof PDPattern || TODO: PdfBox-Android*/ colorSpace == null)
+        {
+            // colorspace of the pattern color isn't known, so just clone
+            // null colorspace can happen with empty annotation color
+            // see PDFBOX-3351-538928-p4.pdf
+            return components.clone();
+        }
+        // PDFBOX-4279: copyOf instead of clone in case array is too small
+        return Arrays.copyOf(components, colorSpace.getNumberOfComponents());
     }
 
     /**

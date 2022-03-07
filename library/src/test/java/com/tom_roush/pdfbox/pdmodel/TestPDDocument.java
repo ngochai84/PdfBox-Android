@@ -16,17 +16,20 @@
  */
 package com.tom_roush.pdfbox.pdmodel;
 
-import com.tom_roush.pdfbox.io.IOUtils;
-
-import junit.framework.TestCase;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.PrintWriter;
 import java.util.Arrays;
+
+import com.tom_roush.pdfbox.io.IOUtils;
+
+import junit.framework.TestCase;
 
 /**
  * Testcase introduced with PDFBOX-1581.
@@ -34,7 +37,7 @@ import java.util.Arrays;
  */
 public class TestPDDocument extends TestCase
 {
-    private File testResultsDir = new File("target/test-output");
+    private final File testResultsDir = new File("target/test-output");
 
     @Override
     protected void setUp() throws Exception
@@ -101,63 +104,6 @@ public class TestPDDocument extends TestCase
     }
 
     /**
-     * Test document save/loadNonSeq using a stream.
-     * @throws IOException if something went wrong
-     */
-    public void testSaveLoadNonSeqStream() throws IOException
-    {
-        // Create PDF with one blank page
-        PDDocument document = new PDDocument();
-        document.addPage(new PDPage());
-
-        // Save
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        document.save(baos);
-        document.close();
-
-        // Verify content
-        byte[] pdf = baos.toByteArray();
-        assertTrue(pdf.length > 200);
-        assertEquals("%PDF-1.4", new String(Arrays.copyOfRange(pdf, 0, 8), "UTF-8"));
-        assertEquals("%%EOF\n", new String(Arrays.copyOfRange(pdf, pdf.length - 6, pdf.length), "UTF-8"));
-
-        // Load
-        PDDocument loadDoc = PDDocument.load(new ByteArrayInputStream(pdf));
-        assertEquals(1, loadDoc.getNumberOfPages());
-        loadDoc.close();
-    }
-
-    /**
-     * Test document save/loadNonSeq using a file.
-     * @throws IOException if something went wrong
-     */
-    public void testSaveLoadNonSeqFile() throws IOException
-    {
-        // Create PDF with one blank page
-        PDDocument document = new PDDocument();
-        document.addPage(new PDPage());
-
-        // Save
-        File targetFile = new File(testResultsDir, "pddocument-saveloadnonseqfile.pdf");
-        document.save(targetFile);
-        document.close();
-
-        // Verify content
-        assertTrue(targetFile.length() > 200);
-        InputStream in = new FileInputStream(targetFile);
-        byte[] pdf = IOUtils.toByteArray(in);
-        in.close();
-        assertTrue(pdf.length > 200);
-        assertEquals("%PDF-1.4", new String(Arrays.copyOfRange(pdf, 0, 8), "UTF-8"));
-        assertEquals("%%EOF\n", new String(Arrays.copyOfRange(pdf, pdf.length - 6, pdf.length), "UTF-8"));
-
-        // Load
-        PDDocument loadDoc = PDDocument.load(targetFile);
-        assertEquals(1, loadDoc.getNumberOfPages());
-        loadDoc.close();
-    }
-
-    /**
      * Test get/setVersion.
      * @throws IOException if something went wrong
      */
@@ -194,5 +140,54 @@ public class TestPDDocument extends TestCase
         // catalog version version has to be 1.5
         assertEquals("1.5", document.getDocumentCatalog().getVersion());
         document.close();
+    }
+
+    /**
+     * Test whether a bad file can be deleted after load() failed.
+     *
+     * @throws java.io.FileNotFoundException
+     */
+    public void testDeleteBadFile() throws FileNotFoundException
+    {
+        File f = new File("test.pdf");
+        PrintWriter pw = new PrintWriter(new FileOutputStream(f));
+        pw.write("<script language='JavaScript'>");
+        pw.close();
+        PDDocument doc = null;
+        try
+        {
+            doc = PDDocument.load(f);
+            fail("parsing should fail");
+        }
+        catch (IOException ex)
+        {
+            // expected
+        }
+        finally
+        {
+            assertNull(doc);
+        }
+
+        boolean deleted = f.delete();
+        assertTrue("delete bad file failed after failed load()", deleted);
+    }
+
+    /**
+     * Test whether a good file can be deleted after load() and close() succeed.
+     *
+     * @throws java.io.FileNotFoundException
+     */
+    public void testDeleteGoodFile() throws IOException
+    {
+        File f = new File("test.pdf");
+        PDDocument doc = new PDDocument();
+        doc.addPage(new PDPage());
+        doc.save(f);
+        doc.close();
+
+        PDDocument.load(f).close();
+
+        boolean deleted = f.delete();
+        assertTrue("delete good file failed after successful load() and close()", deleted);
     }
 }

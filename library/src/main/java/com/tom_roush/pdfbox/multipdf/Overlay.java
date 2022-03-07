@@ -16,6 +16,7 @@
  */
 package com.tom_roush.pdfbox.multipdf;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -23,8 +24,10 @@ import java.io.OutputStream;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.tom_roush.harmony.awt.geom.AffineTransform;
 import com.tom_roush.pdfbox.cos.COSArray;
@@ -33,6 +36,7 @@ import com.tom_roush.pdfbox.cos.COSDictionary;
 import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.cos.COSObject;
 import com.tom_roush.pdfbox.cos.COSStream;
+import com.tom_roush.pdfbox.io.IOUtils;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.pdmodel.PDPage;
 import com.tom_roush.pdfbox.pdmodel.PDResources;
@@ -45,7 +49,7 @@ import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject;
  * Based on code contributed by Balazs Jerk.
  *
  */
-public class Overlay
+public class Overlay implements Closeable
 {
     /**
      * Possible location of the overlayed pages: foreground or background.
@@ -61,15 +65,13 @@ public class Overlay
     private LayoutPage oddPageOverlayPage;
     private LayoutPage evenPageOverlayPage;
 
-    private final Map<Integer, PDDocument> specificPageOverlay = new HashMap<Integer, PDDocument>();
+    private final Set<PDDocument> openDocuments = new HashSet<PDDocument>();
     private Map<Integer, LayoutPage> specificPageOverlayPage = new HashMap<Integer, LayoutPage>();
 
     private Position position = Position.BACKGROUND;
 
     private String inputFileName = null;
     private PDDocument inputPDFDocument = null;
-
-    private String outputFilename = null;
 
     private String defaultOverlayFilename = null;
     private PDDocument defaultOverlay = null;
@@ -93,64 +95,104 @@ public class Overlay
     private boolean useAllOverlayPages = false;
 
     /**
-     * This will add overlays to a documents.
+     * This will add overlays to a document.
      *
-     * @param specificPageOverlayFile map of overlay files for specific pages
+     * @param specificPageOverlayFile Optional map of overlay files for specific pages. The page
+     * numbers are 1-based. The map must be empty (but not null) if no specific mappings are used.
+     *
+     * @return The modified input PDF document, which has to be saved and closed by the caller. If
+     * the input document was passed by {@link #setInputPDF(PDDocument) setInputPDF(PDDocument)}
+     * then it is that object that is returned.
+     *
      * @throws IOException if something went wrong
      */
-    public void overlay(Map<Integer, String> specificPageOverlayFile)
-        throws IOException
+    public PDDocument overlay(Map<Integer, String> specificPageOverlayFile) throws IOException
     {
-        try
+        Map<String, PDDocument> loadedDocuments = new HashMap<String, PDDocument>();
+        Map<PDDocument, LayoutPage> layouts = new HashMap<PDDocument, LayoutPage>();
+        loadPDFs();
+        for (Map.Entry<Integer, String> e : specificPageOverlayFile.entrySet())
         {
-            loadPDFs();
-            for (Map.Entry<Integer, String> e : specificPageOverlayFile.entrySet())
+            PDDocument doc = loadedDocuments.get(e.getValue());
+            if (doc == null)
             {
-                PDDocument doc = loadPDF(e.getValue());
-                specificPageOverlay.put(e.getKey(), doc);
+                doc = loadPDF(e.getValue());
+                loadedDocuments.put(e.getValue(), doc);
+                layouts.put(doc, getLayoutPage(doc));
+            }
+            openDocuments.add(doc);
+            specificPageOverlayPage.put(e.getKey(), layouts.get(doc));
+        }
+        processPages(inputPDFDocument);
+        return inputPDFDocument;
+    }
+
+    /**
+     * This will add overlays documents to a document.
+     *
+     * @param specificPageOverlayDocuments Optional map of overlay documents for specific pages. The
+     * page numbers are 1-based. The map must be empty (but not null) if no specific mappings are
+     * used.
+     *
+     * @return The modified input PDF document, which has to be saved and closed by the caller. If
+     * the input document was passed by {@link #setInputPDF(PDDocument) setInputPDF(PDDocument)}
+     * then it is that object that is returned.
+     *
+     * @throws IOException if something went wrong
+     */
+    public PDDocument overlayDocuments(Map<Integer, PDDocument> specificPageOverlayDocuments) throws IOException
+    {
+        loadPDFs();
+        for (Map.Entry<Integer, PDDocument> e : specificPageOverlayDocuments.entrySet())
+        {
+            PDDocument doc = e.getValue();
+            if (doc != null)
+            {
                 specificPageOverlayPage.put(e.getKey(), getLayoutPage(doc));
             }
-            processPages(inputPDFDocument);
+        }
+        processPages(inputPDFDocument);
+        return inputPDFDocument;
+    }
 
-            inputPDFDocument.save(outputFilename);
-        }
-        finally
+    /**
+     * Close all input documents which were used for the overlay and opened by this class.
+     *
+     * @throws IOException if something went wrong
+     */
+    @Override
+    public void close() throws IOException
+    {
+        if (defaultOverlay != null)
         {
-            if (inputPDFDocument != null)
-            {
-                inputPDFDocument.close();
-            }
-            if (defaultOverlay != null)
-            {
-                defaultOverlay.close();
-            }
-            if (firstPageOverlay != null)
-            {
-                firstPageOverlay.close();
-            }
-            if (lastPageOverlay != null)
-            {
-                lastPageOverlay.close();
-            }
-            if (allPagesOverlay != null)
-            {
-                allPagesOverlay.close();
-            }
-            if (oddPageOverlay != null)
-            {
-                oddPageOverlay.close();
-            }
-            if (evenPageOverlay != null)
-            {
-                evenPageOverlay.close();
-            }
-            for (Map.Entry<Integer, PDDocument> e : specificPageOverlay.entrySet())
-            {
-                e.getValue().close();
-            }
-            specificPageOverlay.clear();
-            specificPageOverlayPage.clear();
+            defaultOverlay.close();
         }
+        if (firstPageOverlay != null)
+        {
+            firstPageOverlay.close();
+        }
+        if (lastPageOverlay != null)
+        {
+            lastPageOverlay.close();
+        }
+        if (allPagesOverlay != null)
+        {
+            allPagesOverlay.close();
+        }
+        if (oddPageOverlay != null)
+        {
+            oddPageOverlay.close();
+        }
+        if (evenPageOverlay != null)
+        {
+            evenPageOverlay.close();
+        }
+        for (PDDocument doc : openDocuments)
+        {
+            doc.close();
+        }
+        openDocuments.clear();
+        specificPageOverlayPage.clear();
     }
 
     private void loadPDFs() throws IOException
@@ -231,12 +273,14 @@ public class Overlay
         private final PDRectangle overlayMediaBox;
         private final COSStream overlayContentStream;
         private final COSDictionary overlayResources;
+        private final int overlayRotation;
 
-        private LayoutPage(PDRectangle mediaBox, COSStream contentStream, COSDictionary resources)
+        private LayoutPage(PDRectangle mediaBox, COSStream contentStream, COSDictionary resources, int rotation)
         {
             overlayMediaBox = mediaBox;
             overlayContentStream = contentStream;
             overlayResources = resources;
+            overlayRotation = rotation;
         }
     }
 
@@ -249,8 +293,8 @@ public class Overlay
         {
             resources = new PDResources();
         }
-        return new LayoutPage(page.getMediaBox(), createContentStream(contents),
-            resources.getCOSObject());
+        return new LayoutPage(page.getMediaBox(), createCombinedContentStream(contents),
+            resources.getCOSObject(), page.getRotation());
     }
 
     private Map<Integer,LayoutPage> getLayoutPages(PDDocument doc) throws IOException
@@ -266,37 +310,38 @@ public class Overlay
             {
                 resources = new PDResources();
             }
-            layoutPages.put(i,new LayoutPage(page.getMediaBox(), createContentStream(contents),
-                resources.getCOSObject()));
+            layoutPages.put(i, new LayoutPage(page.getMediaBox(), createCombinedContentStream(contents),
+                resources.getCOSObject(), page.getRotation()));
         }
         return layoutPages;
     }
 
-    private COSStream createContentStream(COSBase contents) throws IOException
+    private COSStream createCombinedContentStream(COSBase contents) throws IOException
     {
         List<COSStream> contentStreams = createContentStreamList(contents);
         // concatenate streams
-        COSStream concatStream = new COSStream();
+        COSStream concatStream = inputPDFDocument.getDocument().createCOSStream();
         OutputStream out = concatStream.createOutputStream(COSName.FLATE_DECODE);
         for (COSStream contentStream : contentStreams)
         {
-            InputStream in = contentStream.getUnfilteredStream();
-            byte[] buf = new byte[2048];
-            int n;
-            while ((n = in.read(buf)) > 0)
-            {
-                out.write(buf, 0, n);
-            }
+            InputStream in = contentStream.createInputStream();
+            IOUtils.copy(in, out);
             out.flush();
+            in.close();
         }
         out.close();
         return concatStream;
     }
 
+    // get the content streams as a list
     private List<COSStream> createContentStreamList(COSBase contents) throws IOException
     {
         List<COSStream> contentStreams = new ArrayList<COSStream>();
-        if (contents instanceof COSStream)
+        if (contents == null)
+        {
+            return contentStreams;
+        }
+        else if (contents instanceof COSStream)
         {
             contentStreams.add((COSStream) contents);
         }
@@ -313,45 +358,56 @@ public class Overlay
         }
         else
         {
-            throw new IOException("Contents are unknown type:" + contents.getClass().getName());
+            throw new IOException("Unknown content type: " + contents.getClass().getName());
         }
         return contentStreams;
     }
 
     private void processPages(PDDocument document) throws IOException
     {
-        int pageCount = 0;
+        int pageCounter = 0;
         for (PDPage page : document.getPages())
         {
+            pageCounter++;
             COSDictionary pageDictionary = page.getCOSObject();
-            COSBase contents = pageDictionary.getDictionaryObject(COSName.CONTENTS);
-            COSArray contentArray = new COSArray();
+            COSBase originalContent = pageDictionary.getDictionaryObject(COSName.CONTENTS);
+            COSArray newContentArray = new COSArray();
+            LayoutPage layoutPage = getLayoutPage(pageCounter, document.getNumberOfPages());
+            if (layoutPage == null)
+            {
+                continue;
+            }
             switch (position)
             {
                 case FOREGROUND:
                     // save state
-                    contentArray.add(createStream("q\n"));
-                    addOriginalContent(contents, contentArray);
+                    newContentArray.add(createStream("q\n"));
+                    addOriginalContent(originalContent, newContentArray);
                     // restore state
-                    contentArray.add(createStream("Q\n"));
-                    // overlay content
-                    overlayPage(contentArray, page, pageCount + 1, document.getNumberOfPages());
+                    newContentArray.add(createStream("Q\n"));
+                    // overlay content last
+                    overlayPage(page, layoutPage, newContentArray);
                     break;
                 case BACKGROUND:
-                    // overlay content
-                    overlayPage(contentArray, page, pageCount + 1, document.getNumberOfPages());
-                    addOriginalContent(contents, contentArray);
+                    // overlay content first
+                    overlayPage(page, layoutPage, newContentArray);
+
+                    addOriginalContent(originalContent, newContentArray);
                     break;
                 default:
                     throw new IOException("Unknown type of position:" + position);
             }
-            pageDictionary.setItem(COSName.CONTENTS, contentArray);
-            pageCount++;
+            pageDictionary.setItem(COSName.CONTENTS, newContentArray);
         }
     }
 
     private void addOriginalContent(COSBase contents, COSArray contentArray) throws IOException
     {
+        if (contents == null)
+        {
+            return;
+        }
+
         if (contents instanceof COSStream)
         {
             contentArray.add(contents);
@@ -362,12 +418,24 @@ public class Overlay
         }
         else
         {
-            throw new IOException("Unknown content type:" + contents.getClass().getName());
+            throw new IOException("Unknown content type: " + contents.getClass().getName());
         }
     }
 
-    private void overlayPage(COSArray array, PDPage page, int pageNumber, int numberOfPages)
+    private void overlayPage(PDPage page, LayoutPage layoutPage, COSArray array)
         throws IOException
+    {
+        PDResources resources = page.getResources();
+        if (resources == null)
+        {
+            resources = new PDResources();
+            page.setResources(resources);
+        }
+        COSName xObjectId = createOverlayXObject(page, layoutPage);
+        array.add(createOverlayStream(page, layoutPage, xObjectId));
+    }
+
+    private LayoutPage getLayoutPage(int pageNumber, int numberOfPages)
     {
         LayoutPage layoutPage = null;
         if (!useAllOverlayPages && specificPageOverlayPage.containsKey(pageNumber))
@@ -399,27 +467,34 @@ public class Overlay
             int usePageNum = (pageNumber -1 ) % numberOfOverlayPages;
             layoutPage = specificPageOverlayPage.get(usePageNum);
         }
-        if (layoutPage != null)
-        {
-            PDResources resources = page.getResources();
-            if (resources == null)
-            {
-                resources = new PDResources();
-                page.setResources(resources);
-            }
-            COSName xObjectId = createOverlayXObject(page, layoutPage,
-                layoutPage.overlayContentStream);
-            array.add(createOverlayStream(page, layoutPage, xObjectId));
-        }
+        return layoutPage;
     }
 
-    private COSName createOverlayXObject(PDPage page, LayoutPage layoutPage, COSStream contentStream)
+    private COSName createOverlayXObject(PDPage page, LayoutPage layoutPage)
     {
-        PDFormXObject xobjForm = new PDFormXObject(contentStream);
+        PDFormXObject xobjForm = new PDFormXObject(layoutPage.overlayContentStream);
         xobjForm.setResources(new PDResources(layoutPage.overlayResources));
         xobjForm.setFormType(1);
-        xobjForm.setBBox( layoutPage.overlayMediaBox.createRetranslatedRectangle());
-        xobjForm.setMatrix(new AffineTransform());
+        xobjForm.setBBox(layoutPage.overlayMediaBox.createRetranslatedRectangle());
+        AffineTransform at = new AffineTransform();
+        switch (layoutPage.overlayRotation)
+        {
+            case 90:
+                at.translate(0, layoutPage.overlayMediaBox.getWidth());
+                at.rotate(Math.toRadians(-90));
+                break;
+            case 180:
+                at.translate(layoutPage.overlayMediaBox.getWidth(), layoutPage.overlayMediaBox.getHeight());
+                at.rotate(Math.toRadians(-180));
+                break;
+            case 270:
+                at.translate(layoutPage.overlayMediaBox.getHeight(), 0);
+                at.rotate(Math.toRadians(-270));
+                break;
+            default:
+                break;
+        }
+        xobjForm.setMatrix(at);
         PDResources resources = page.getResources();
         return resources.add(xobjForm, "OL");
     }
@@ -428,23 +503,58 @@ public class Overlay
         throws IOException
     {
         // create a new content stream that executes the XObject content
-        PDRectangle pageMediaBox = page.getMediaBox();
-        float hShift = (pageMediaBox.getWidth() - layoutPage.overlayMediaBox.getWidth()) / 2.0f;
-        float vShift = (pageMediaBox.getHeight() - layoutPage.overlayMediaBox.getHeight()) / 2.0f;
         StringBuilder overlayStream = new StringBuilder();
-        overlayStream.append("q\nq 1 0 0 1 ");
-        overlayStream.append(float2String(hShift));
-        overlayStream.append(" ");
-        overlayStream.append(float2String(vShift) );
-        overlayStream.append(" cm /");
+        overlayStream.append("q\nq\n");
+        PDRectangle overlayMediaBox = new PDRectangle(layoutPage.overlayMediaBox.getCOSArray());
+        if (layoutPage.overlayRotation == 90 || layoutPage.overlayRotation == 270)
+        {
+            overlayMediaBox.setLowerLeftX(layoutPage.overlayMediaBox.getLowerLeftY());
+            overlayMediaBox.setLowerLeftY(layoutPage.overlayMediaBox.getLowerLeftX());
+            overlayMediaBox.setUpperRightX(layoutPage.overlayMediaBox.getUpperRightY());
+            overlayMediaBox.setUpperRightY(layoutPage.overlayMediaBox.getUpperRightX());
+        }
+        AffineTransform at = calculateAffineTransform(page, overlayMediaBox);
+        double[] flatmatrix = new double[6];
+        at.getMatrix(flatmatrix);
+        for (double v : flatmatrix)
+        {
+            overlayStream.append(float2String((float) v));
+            overlayStream.append(" ");
+        }
+        overlayStream.append(" cm\n");
+
+        // if debugging, insert
+        // 0 0 overlayMediaBox.getHeight() overlayMediaBox.getWidth() re\ns\n
+        // into the content stream
+
+        overlayStream.append(" /");
         overlayStream.append(xObjectId.getName());
         overlayStream.append(" Do Q\nQ\n");
         return createStream(overlayStream.toString());
     }
 
+    /**
+     * Calculate the transform to be used when positioning the overlay. The default implementation
+     * centers on the destination. Override this method to do your own, e.g. move to a corner, or
+     * rotate.
+     *
+     * @param page The page that will get the overlay.
+     * @param overlayMediaBox The overlay media box.
+     * @return The affine transform to be used.
+     */
+    protected AffineTransform calculateAffineTransform(PDPage page, PDRectangle overlayMediaBox)
+    {
+        AffineTransform at = new AffineTransform();
+        PDRectangle pageMediaBox = page.getMediaBox();
+        float hShift = (pageMediaBox.getWidth() - overlayMediaBox.getWidth()) / 2.0f;
+        float vShift = (pageMediaBox.getHeight() - overlayMediaBox.getHeight()) / 2.0f;
+        at.translate(hShift, vShift);
+        return at;
+    }
+
     private String float2String(float floatValue)
     {
-        // use a BigDecimal as intermediate state to avoid
+        // use a BigDecimal as intermediate state to avoid 
         // a floating point string representation of the float value
         BigDecimal value = new BigDecimal(String.valueOf(floatValue));
         String stringValue = value.toPlainString();
@@ -461,8 +571,9 @@ public class Overlay
 
     private COSStream createStream(String content) throws IOException
     {
-        COSStream stream = new COSStream();
-        OutputStream out = stream.createOutputStream(COSName.FLATE_DECODE);
+        COSStream stream = inputPDFDocument.getDocument().createCOSStream();
+        OutputStream out = stream.createOutputStream(
+            content.length() > 20 ? COSName.FLATE_DECODE : null);
         out.write(content.getBytes("ISO-8859-1"));
         out.close();
         return stream;
@@ -481,7 +592,9 @@ public class Overlay
     /**
      * Sets the file to be overlayed.
      *
-     * @param inputFile the file to be overlayed
+     * @param inputFile the file to be overlayed. The {@link PDDocument} object gathered from
+     * opening this file will be returned by
+     * {@link #overlay(java.util.Map) overlay(Map&lt;Integer, String&gt;)}.
      */
     public void setInputFile(String inputFile)
     {
@@ -491,7 +604,8 @@ public class Overlay
     /**
      * Sets the PDF to be overlayed.
      *
-     * @param inputPDF the PDF to be overlayed
+     * @param inputPDF the PDF to be overlayed. This will be the object that is returned by
+     * {@link #overlay(java.util.Map) overlay(Map&lt;Integer, String&gt;)}.
      */
     public void setInputPDF(PDDocument inputPDF)
     {
@@ -506,26 +620,6 @@ public class Overlay
     public String getInputFile()
     {
         return inputFileName;
-    }
-
-    /**
-     * Sets the output file.
-     *
-     * @param outputFile the output file
-     */
-    public void setOutputFile(String outputFile)
-    {
-        outputFilename = outputFile;
-    }
-
-    /**
-     * Returns the output file.
-     *
-     * @return the output file
-     */
-    public String getOutputFile()
-    {
-        return outputFilename;
     }
 
     /**
@@ -611,7 +705,8 @@ public class Overlay
     /**
      * Sets the all pages overlay PDF.
      *
-     * @param allPagesOverlayPDF the all pages overlay PDF
+     * @param allPagesOverlayPDF the all pages overlay PDF. This should not be a PDDocument that you
+     * created on the fly, it should be saved first, if it contains any fonts that are subset.
      */
     public void setAllPagesOverlayPDF(PDDocument allPagesOverlayPDF)
     {

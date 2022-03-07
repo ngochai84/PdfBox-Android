@@ -16,10 +16,11 @@
  */
 package com.tom_roush.pdfbox.pdmodel.interactive.form;
 
-import com.tom_roush.pdfbox.cos.COSDictionary;
-
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
+
+import com.tom_roush.pdfbox.cos.COSDictionary;
 
 /**
  * A pushbutton is a purely interactive control that responds immediately to user
@@ -29,8 +30,8 @@ import java.util.List;
  */
 public class PDPushButton extends PDButton
 {
-	/**
-     * @see PDField#PDfield(PDAcroForm)
+    /**
+     * @see PDField#PDField(PDAcroForm)
      *
      * @param acroForm The acroform.
      */
@@ -45,7 +46,7 @@ public class PDPushButton extends PDButton
      *
      * @param acroForm The form that this field is part of.
      * @param field the PDF object to represent as a field.
-     * @param parent the parent node of the node to be created
+     * @param parent the parent node of the node
      */
     PDPushButton(PDAcroForm acroForm, COSDictionary field, PDNonTerminalField parent)
     {
@@ -63,15 +64,31 @@ public class PDPushButton extends PDButton
     {
         if (values != null && !values.isEmpty())
         {
-            throw new IllegalArgumentException(
-                "A PDPushButton shall not use the Opt entry in the field dictionary");
+            throw new IllegalArgumentException("A PDPushButton shall not use the Opt entry in the field dictionary");
         }
+    }
+
+    @Override
+    public String getValue()
+    {
+        return "";
+    }
+
+    @Override
+    public String getDefaultValue()
+    {
+        return "";
     }
 
     @Override
     public String getValueAsString()
     {
-        // PushButton fields don't support the "V" entry.
-        return "";
+        return getValue();
+    }
+
+    @Override
+    void constructAppearances() throws IOException
+    {
+        // TODO: add appearance handler to generate/update appearance
     }
 }

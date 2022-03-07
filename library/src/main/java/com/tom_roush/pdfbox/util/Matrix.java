@@ -18,10 +18,13 @@ package com.tom_roush.pdfbox.util;
 
 import android.graphics.PointF;
 
+import java.util.Arrays;
+
+import com.tom_roush.harmony.awt.geom.AffineTransform;
 import com.tom_roush.pdfbox.cos.COSArray;
+import com.tom_roush.pdfbox.cos.COSBase;
 import com.tom_roush.pdfbox.cos.COSFloat;
 import com.tom_roush.pdfbox.cos.COSNumber;
-import com.tom_roush.harmony.awt.geom.AffineTransform;
 
 /**
  * This class will be used for matrix manipulation.
@@ -32,15 +35,15 @@ public final class Matrix implements Cloneable
 {
     static final float[] DEFAULT_SINGLE =
         {
-            1,0,0,  //  a  b  0		sx hy 0 note: hx and hy are reversed vs. the PDF spec as we use
-            0,1,0,  //  c  d  0		hx sy 0 AffineTransform's definition x and y shear
-            0,0,1   //  tx ty 1		tx ty 1
+            1,0,0,  //  a  b  0     sx hy 0    note: hx and hy are reversed vs. the PDF spec as we use
+            0,1,0,  //  c  d  0  =  hx sy 0          AffineTransform's definition x and y shear
+            0,0,1   //  tx ty 1     tx ty 1
         };
 
     private final float[] single;
 
     /**
-     * Constructor.
+     * Constructor. This produces an identity matrix.
      */
     public Matrix()
     {
@@ -49,22 +52,38 @@ public final class Matrix implements Cloneable
     }
 
     /**
-     * Creates a matrix from a 6-element COS array.
+     * Creates a matrix from a 6-element (a b c d e f) COS array.
+     *
+     * @param array
      */
     public Matrix(COSArray array)
     {
         single = new float[DEFAULT_SINGLE.length];
-        single[0] = ((COSNumber)array.get(0)).floatValue();
-        single[1] = ((COSNumber)array.get(1)).floatValue();
-        single[3] = ((COSNumber)array.get(2)).floatValue();
-        single[4] = ((COSNumber)array.get(3)).floatValue();
-        single[6] = ((COSNumber)array.get(4)).floatValue();
-        single[7] = ((COSNumber)array.get(5)).floatValue();
+        single[0] = ((COSNumber)array.getObject(0)).floatValue();
+        single[1] = ((COSNumber)array.getObject(1)).floatValue();
+        single[3] = ((COSNumber)array.getObject(2)).floatValue();
+        single[4] = ((COSNumber)array.getObject(3)).floatValue();
+        single[6] = ((COSNumber)array.getObject(4)).floatValue();
+        single[7] = ((COSNumber)array.getObject(5)).floatValue();
         single[8] = 1;
     }
 
     /**
-     * Creates a matrix with the given 6 elements.
+     * Creates a transformation matrix with the given 6 elements. Transformation matrices are
+     * discussed in 8.3.3, "Common Transformations" and 8.3.4, "Transformation Matrices" of the PDF
+     * specification. For simple purposes (rotate, scale, translate) it is recommended to use the
+     * static methods below.
+     *
+     * @see Matrix#getRotateInstance(double, float, float)
+     * @see Matrix#getScaleInstance(float, float)
+     * @see Matrix#getTranslateInstance(float, float)
+     *
+     * @param a the X coordinate scaling element (m00) of the 3x3 matrix
+     * @param b the Y coordinate shearing element (m10) of the 3x3 matrix
+     * @param c the X coordinate shearing element (m01) of the 3x3 matrix
+     * @param d the Y coordinate scaling element (m11) of the 3x3 matrix
+     * @param e the X coordinate translation element (m02) of the 3x3 matrix
+     * @param f the Y coordinate translation element (m12) of the 3x3 matrix
      */
     public Matrix(float a, float b, float c, float d, float e, float f)
     {
@@ -80,6 +99,7 @@ public final class Matrix implements Cloneable
 
     /**
      * Creates a matrix with the same elements as the given AffineTransform.
+     * @param at
      */
     public Matrix(AffineTransform at)
     {
@@ -93,6 +113,35 @@ public final class Matrix implements Cloneable
         single[7] = (float)at.getTranslateY();
     }
 
+    /**
+     * Convenience method to be used when creating a matrix from unverified data. If the parameter
+     * is a COSArray with at least six numbers, a Matrix object is created from the first six
+     * numbers and returned. If not, then the identity Matrix is returned.
+     *
+     * @param base a COS object, preferably a COSArray with six numbers.
+     *
+     * @return a Matrix object.
+     */
+    public static Matrix createMatrix(COSBase base)
+    {
+        if (!(base instanceof COSArray))
+        {
+            return new Matrix();
+        }
+        COSArray array = (COSArray) base;
+        if (array.size() < 6)
+        {
+            return new Matrix();
+        }
+        for (int i = 0; i < 6; ++i)
+        {
+            if (!(array.getObject(i) instanceof COSNumber))
+            {
+                return new Matrix();
+            }
+        }
+        return new Matrix(array);
+    }
 
     /**
      * This method resets the numbers in this Matrix to the original values, which are
@@ -135,7 +184,6 @@ public final class Matrix implements Cloneable
         single[6] = (float)af.getTranslateX();
         single[7] = (float)af.getTranslateY();
     }
-
 
     /**
      * This will get a matrix value at some point.
@@ -226,7 +274,7 @@ public final class Matrix implements Cloneable
     }
 
     /**
-     * Translates this matrix by the given amount.
+     * Translates this matrix by the given ammount.
      *
      * @param tx x-translation
      * @param ty y-translation
@@ -250,7 +298,7 @@ public final class Matrix implements Cloneable
     }
 
     /**
-     * Rotates this matrix by the given factors.
+     * Rotares this matrix by the given factors.
      *
      * @param theta The angle of rotation measured in radians
      */
@@ -261,7 +309,7 @@ public final class Matrix implements Cloneable
     }
 
     /**
-     * This will take the current matrix and multipy it with a matrix that is passed in.
+     * This will take the current matrix and multiply it with a matrix that is passed in.
      *
      * @param b The matrix to multiply by.
      *
@@ -276,7 +324,7 @@ public final class Matrix implements Cloneable
      * This method multiplies this Matrix with the specified other Matrix, storing the product in the specified
      * result Matrix. By reusing Matrix instances like this, multiplication chains can be executed without having
      * to create many temporary Matrix objects.
-     * <p/>
+     * <p>
      * It is allowed to have (other == this) or (result == this) or indeed (other == result) but if this is done,
      * the backing float[] matrix values may be copied in order to ensure a correct product.
      *
@@ -360,8 +408,8 @@ public final class Matrix implements Cloneable
      */
     public void transform(PointF point)
     {
-        float x = point.x;
-        float y = point.y;
+        float x = (float)point.x;
+        float y = (float)point.y;
         float a = single[0];
         float b = single[1];
         float c = single[3];
@@ -377,7 +425,7 @@ public final class Matrix implements Cloneable
      * @param x x-coordinate
      * @param y y-coordinate
      */
-    public PointF transformPoint(double x, double y)
+    public PointF transformPoint(float x, float y)
     {
         float a = single[0];
         float b = single[1];
@@ -385,13 +433,13 @@ public final class Matrix implements Cloneable
         float d = single[4];
         float e = single[6];
         float f = single[7];
-        return new PointF((float)(x * a + y * c + e), (float)(x * b + y * d + f));
+        return new PointF(x * a + y * c + e, x * b + y * d + f);
     }
 
     /**
      * Transforms the given point by this matrix.
      *
-     * @param vector @2D vector
+     * @param vector 2D vector
      */
     public Vector transform(Vector vector)
     {
@@ -457,7 +505,9 @@ public final class Matrix implements Cloneable
      * @param tx The x translating operator.
      * @param ty The y translating operator.
      * @return A new matrix with just the x/y translating.
+     * @deprecated Use {@link #getTranslateInstance} instead.
      */
+    @Deprecated
     public static Matrix getTranslatingInstance(float tx, float ty)
     {
         return getTranslateInstance(tx, ty);
@@ -490,6 +540,7 @@ public final class Matrix implements Cloneable
     {
         float cosTheta = (float)Math.cos(theta);
         float sinTheta = (float)Math.sin(theta);
+
         Matrix matrix = new Matrix();
         matrix.single[0] = cosTheta;
         matrix.single[1] = sinTheta;
@@ -576,7 +627,9 @@ public final class Matrix implements Cloneable
     }
 
     /**
-     *  * Returns the x-scaling element of this matrix.
+     * Returns the x-scaling element of this matrix.
+     *
+     * @see #getScalingFactorX()
      */
     public float getScaleX()
     {
@@ -601,6 +654,8 @@ public final class Matrix implements Cloneable
 
     /**
      * Returns the y-scaling element of this matrix.
+     *
+     * @see #getScalingFactorY()
      */
     public float getScaleY()
     {
@@ -625,6 +680,7 @@ public final class Matrix implements Cloneable
 
     /**
      * Get the x position in the matrix. This method is deprecated as it is incorrectly named.
+     *
      * @return The x-position.
      * @deprecated Use {@link #getTranslateX} instead
      */
@@ -636,6 +692,7 @@ public final class Matrix implements Cloneable
 
     /**
      * Get the y position. This method is deprecated as it is incorrectly named.
+     *
      * @return The y position.
      * @deprecated Use {@link #getTranslateY} instead
      */
@@ -663,14 +720,36 @@ public final class Matrix implements Cloneable
     @Override
     public String toString()
     {
-        StringBuffer sb = new StringBuffer( "" );
-        sb.append("[");
-        sb.append(single[0] + ",");
-        sb.append(single[1] + ",");
-        sb.append(single[3] + ",");
-        sb.append(single[4] + ",");
-        sb.append(single[6] + ",");
-        sb.append(single[7] + "]");
-        return sb.toString();
+        return "[" +
+            single[0] + "," +
+            single[1] + "," +
+            single[3] + "," +
+            single[4] + "," +
+            single[6] + "," +
+            single[7] + "]";
+    }
+
+    @Override
+    public int hashCode()
+    {
+        return Arrays.hashCode(single);
+    }
+
+    @Override
+    public boolean equals(Object obj)
+    {
+        if (this == obj)
+        {
+            return true;
+        }
+        if (obj == null)
+        {
+            return false;
+        }
+        if (getClass() != obj.getClass())
+        {
+            return false;
+        }
+        return Arrays.equals(this.single, ((Matrix) obj).single);
     }
 }

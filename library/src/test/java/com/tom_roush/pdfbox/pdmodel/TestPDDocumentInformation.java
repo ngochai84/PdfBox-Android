@@ -16,11 +16,11 @@
  */
 package com.tom_roush.pdfbox.pdmodel;
 
-import junit.framework.TestCase;
-
 import java.io.File;
 import java.util.Arrays;
 import java.util.List;
+
+import junit.framework.TestCase;
 
 /**
  * This class tests the extraction of document-level metadata.
@@ -36,7 +36,7 @@ public class TestPDDocumentInformation extends TestCase
         try
         {
             // This document has been selected for this test as it contains custom metadata.
-            doc = PDDocument.load( new File(getClass().getResource("/pdfbox/input/hello3.pdf").toURI()) );
+            doc = PDDocument.load( new File("src/test/resources/pdfbox/input/hello3.pdf"));
             PDDocumentInformation info = doc.getDocumentInformation();
 
             assertEquals("Wrong author", "Brian Carrier", info.getAuthor());
@@ -52,7 +52,7 @@ public class TestPDDocumentInformation extends TestCase
                 "Producer", "ModDate", "Company",
                 "SourceModified", "Title");
             assertEquals("Wrong metadata key count", expectedMetadataKeys.size(),
-                    info.getMetadataKeys().size());
+                info.getMetadataKeys().size());
             for (String key : expectedMetadataKeys)
             {
                 assertTrue("Missing metadata key:" + key, info.getMetadataKeys().contains(key));
@@ -70,4 +70,18 @@ public class TestPDDocumentInformation extends TestCase
             }
         }
     }
+
+    /**
+     * PDFBOX-3068: test that indirect /Title element of /Info entry can be found.
+     *
+     * @throws Exception
+     */
+    public void testPDFBox3068() throws Exception
+    {
+        PDDocument doc = PDDocument.load(TestPDDocumentInformation.class.getResourceAsStream("/pdfbox/com/tom_roush/pdfbox/pdmodel/PDFBOX-3068.pdf"));
+        PDDocumentInformation documentInformation = doc.getDocumentInformation();
+        assertEquals("Title", documentInformation.getTitle());
+        doc.close();
+    }
+
 }

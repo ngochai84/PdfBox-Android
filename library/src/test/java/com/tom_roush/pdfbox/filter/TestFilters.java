@@ -16,22 +16,27 @@
  */
 package com.tom_roush.pdfbox.filter;
 
-import com.tom_roush.pdfbox.cos.COSDictionary;
-import com.tom_roush.pdfbox.cos.COSName;
-
-import junit.framework.TestCase;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.Arrays;
 import java.util.Random;
+
+import com.tom_roush.pdfbox.cos.COSDictionary;
+import com.tom_roush.pdfbox.cos.COSName;
+import com.tom_roush.pdfbox.io.IOUtils;
+import com.tom_roush.pdfbox.pdmodel.PDDocument;
+
+import org.junit.Test;
+
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 /**
  * This will test all of the filters in the PDFBox system.
  */
-public class TestFilters extends TestCase
+public class TestFilters
 {
     /**
      * This will test all of the filters in the system. There will be COUNT
@@ -40,6 +45,7 @@ public class TestFilters extends TestCase
      *
      * @throws IOException If there is an exception while encoding.
      */
+    @Test
     public void testFilters() throws IOException
     {
         final int COUNT = 10;
@@ -65,14 +71,14 @@ public class TestFilters extends TestCase
                 byte[] original = new byte[numBytes];
 
                 int upto = 0;
-                while (upto < numBytes)
+                while(upto < numBytes)
                 {
                     final int left = numBytes - upto;
                     if (random.nextBoolean() || left < 2)
                     {
                         // Fill w/ pseudo-random bytes:
-                        final int end = upto + Math.min(left, 10 + random.nextInt(100));
-                        while (upto < end)
+                        final int end = upto + Math.min(left, 10+random.nextInt(100));
+                        while(upto < end)
                         {
                             original[upto++] = (byte) random.nextInt();
                         }
@@ -80,23 +86,23 @@ public class TestFilters extends TestCase
                     else
                     {
                         // Fill w/ very predictable bytes:
-                        final int end = upto + Math.min(left, 2 + random.nextInt(10));
+                        final int end = upto + Math.min(left, 2+random.nextInt(10));
                         final byte value = (byte) random.nextInt(4);
-                        while (upto < end)
+                        while(upto < end)
                         {
                             original[upto++] = value;
                         }
                     }
                 }
 
-                for (Filter filter : FilterFactory.INSTANCE.getAllFilters())
+                for( Filter filter : FilterFactory.INSTANCE.getAllFilters() )
                 {
                     // Skip filters that don't currently support roundtripping
-                    if (filter instanceof DCTFilter ||
+                    if( filter instanceof DCTFilter ||
                         filter instanceof CCITTFaxFilter ||
 //                        filter instanceof JPXFilter ||
 //                        filter instanceof JBIG2Filter || TODO: PdfBox-Android
-                        filter instanceof RunLengthDecodeFilter)
+                        filter instanceof RunLengthDecodeFilter )
                     {
                         continue;
                     }
@@ -116,25 +122,33 @@ public class TestFilters extends TestCase
     }
 
     /**
+     * This will test the use of identity filter to decode stream and string.
+     * This test threw an IOException before the correction.
+     *
+     * @throws IOException
+     */
+    @Test
+    public void testPDFBOX4517() throws IOException
+    {
+        File inputPdf = new File("target/pdfs/PDFBOX-4517-cryptfilter.pdf");
+        assumeTrue(inputPdf.exists());
+        PDDocument.load(inputPdf,
+            "userpassword1234");
+    }
+
+    /**
      * This will test the LZW filter with the sequence that failed in PDFBOX-1777.
      * To check that the test itself is legit, revert LZWFilter.java to rev 1571801,
      * which should fail this test.
      *
      * @throws IOException
      */
+    @Test
     public void testPDFBOX1777() throws IOException
     {
         Filter lzwFilter = FilterFactory.INSTANCE.getFilter(COSName.LZW_DECODE);
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        InputStream is = this.getClass().getResourceAsStream("/pdfbox/com/tom_roush/pdfbox/filter/PDFBOX-1777.bin");
-        int by;
-        while ((by = is.read()) != -1)
-        {
-            baos.write(by);
-        }
-        is.close();
-
-        checkEncodeDecode(lzwFilter, baos.toByteArray());
+        byte[] byteArray = IOUtils.toByteArray(this.getClass().getResourceAsStream("/pdfbox/com/tom_roush/pdfbox/filter/PDFBOX-1777.bin"));
+        checkEncodeDecode(lzwFilter, byteArray);
     }
 
     private void checkEncodeDecode(Filter filter, byte[] original) throws IOException

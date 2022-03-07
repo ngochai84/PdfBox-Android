@@ -20,7 +20,7 @@ import java.io.IOException;
 
 /**
  * The "cmap" table of a true type font.
- * 
+ *
  * @author Ben Litchfield
  */
 public class CmapTable extends TTFTable
@@ -46,6 +46,7 @@ public class CmapTable extends TTFTable
     public static final int ENCODING_WIN_PRC = 4;
     public static final int ENCODING_WIN_WANSUNG = 5;
     public static final int ENCODING_WIN_JOHAB = 6;
+    public static final int ENCODING_WIN_UNICODE_FULL = 10; // Unicode Full (UCS-4)
 
     // Unicode encodings
     public static final int ENCODING_UNICODE_1_0 = 0;
@@ -62,13 +63,15 @@ public class CmapTable extends TTFTable
 
     /**
      * This will read the required data from the stream.
-     * 
+     *
      * @param ttf The font that is being read.
      * @param data The stream to read the data from.
      * @throws IOException If there is an error reading the data.
      */
-    public void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
+    @Override
+    void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
     {
+        @SuppressWarnings({"unused", "squid:S1854", "squid:S1481"})
         int version = data.readUnsignedShort();
         int numberOfTables = data.readUnsignedShort();
         cmaps = new CmapSubtable[numberOfTables];

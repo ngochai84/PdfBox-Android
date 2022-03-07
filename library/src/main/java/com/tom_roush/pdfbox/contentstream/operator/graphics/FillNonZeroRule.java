@@ -16,13 +16,14 @@
  */
 package com.tom_roush.pdfbox.contentstream.operator.graphics;
 
+import android.graphics.Path;
+
 import java.io.IOException;
 import java.util.List;
 
 import com.tom_roush.pdfbox.contentstream.operator.Operator;
+import com.tom_roush.pdfbox.contentstream.operator.OperatorName;
 import com.tom_roush.pdfbox.cos.COSBase;
-
-import android.graphics.Path;
 
 /**
  * f Fill path using non zero winding rule.
@@ -40,6 +41,6 @@ public class FillNonZeroRule extends GraphicsOperatorProcessor
     @Override
     public String getName()
     {
-        return "f";
+        return OperatorName.FILL_NON_ZERO;
     }
 }

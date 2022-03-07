@@ -18,24 +18,30 @@ package com.tom_roush.pdfbox.pdmodel.graphics.image;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.support.test.InstrumentationRegistry;
 import android.util.Log;
 
+import androidx.test.platform.app.InstrumentationRegistry;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+
+import com.tom_roush.pdfbox.cos.COSName;
+import com.tom_roush.pdfbox.io.IOUtils;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceGray;
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceRGB;
-import com.tom_roush.pdfbox.util.PDFBoxResourceLoader;
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 
 import org.junit.Before;
 import org.junit.Test;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-
 import static com.tom_roush.pdfbox.pdmodel.graphics.image.ValidateXImage.colorCount;
 import static com.tom_roush.pdfbox.pdmodel.graphics.image.ValidateXImage.doWritePDF;
 import static com.tom_roush.pdfbox.pdmodel.graphics.image.ValidateXImage.validate;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
@@ -54,8 +60,7 @@ public class JPEGFactoryTest
     {
         testContext = InstrumentationRegistry.getInstrumentation().getContext();
         PDFBoxResourceLoader.init(testContext);
-        testResultsDir = new File(android.os.Environment.getExternalStorageDirectory() +
-            "/Download/pdfbox-test-output/graphics/");
+        testResultsDir = new File(testContext.getCacheDir(), "pdfbox-test-output/graphics/");
         testResultsDir.mkdirs();
     }
 
@@ -73,6 +78,23 @@ public class JPEGFactoryTest
         validate(ximage, 8, 344, 287, "jpg", PDDeviceRGB.INSTANCE.getName());
 
         doWritePDF(document, ximage, testResultsDir, "jpegrgbstream.pdf");
+        checkJpegStream(testResultsDir, "jpegrgbstream.pdf", testContext.getAssets().open(
+            "pdfbox/com/tom_roush/pdfbox/pdmodel/graphics/image/jpeg.jpg"));
+    }
+
+    /*
+     * Tests JPEGFactory#createFromStream(PDDocument document, InputStream
+     * stream) with CMYK color JPEG file
+     */
+    public void testCreateFromStreamCMYK() throws IOException
+    {
+        PDDocument document = new PDDocument();
+        InputStream stream = testContext.getAssets().open("pdfbox/com/tom_roush/pdfbox/pdmodel/graphics/image/jpegcmyk.jpg");
+        PDImageXObject ximage = JPEGFactory.createFromStream(document, stream);
+        validate(ximage, 8, 343, 287, "jpg", PDDeviceRGB.INSTANCE.getName()); // TODO: PdfBox-Android
+
+        doWritePDF(document, ximage, testResultsDir, "jpegcmykstream.pdf");
+        checkJpegStream(testResultsDir, "jpegcmykstream.pdf", testContext.getAssets().open("pdfbox/com/tom_roush/pdfbox/pdmodel/graphics/image/jpegcmyk.jpg"));
     }
 
     /**
@@ -86,9 +108,11 @@ public class JPEGFactoryTest
         InputStream stream = testContext.getAssets().open(
             "pdfbox/com/tom_roush/pdfbox/pdmodel/graphics/image/jpeg256.jpg");
         PDImageXObject ximage = JPEGFactory.createFromStream(document, stream);
-        validate(ximage, 8, 344, 287, "jpg", PDDeviceGray.INSTANCE.getName());
+        validate(ximage, 8, 344, 287, "jpg", PDDeviceRGB.INSTANCE.getName()); // TODO: PdfBox-Android
 
         doWritePDF(document, ximage, testResultsDir, "jpeg256stream.pdf");
+        checkJpegStream(testResultsDir, "jpeg256stream.pdf", testContext.getAssets().open(
+            "pdfbox/com/tom_roush/pdfbox/pdmodel/graphics/image/jpeg256.jpg"));
     }
 
     /**
@@ -121,7 +145,7 @@ public class JPEGFactoryTest
 //        assertEquals(1, image.getColorModel().getNumComponents()); TODO: PdfBox-Android
         Log.e("PdfBox-Android", image.getConfig().toString());
         PDImageXObject ximage = JPEGFactory.createFromImage(document, image);
-        validate(ximage, 8, 344, 287, "jpg", PDDeviceGray.INSTANCE.getName());
+        validate(ximage, 8, 344, 287, "jpg", PDDeviceRGB.INSTANCE.getName()); // TODO: PdfBox-Android
 
         doWritePDF(document, ximage, testResultsDir, "jpeg256.pdf");
     }
@@ -226,5 +250,24 @@ public class JPEGFactoryTest
         assertTrue(colorCount(ximage.getSoftMask().getImage()) >= 16);
 
         doWritePDF(document, ximage, testResultsDir, "jpeg-4bargb.pdf");
+    }
+
+    // check whether it is possible to extract the jpeg stream exactly
+    // as it was passed to createFromStream
+    private void checkJpegStream(File testResultsDir, String filename, InputStream resourceStream)
+        throws IOException
+    {
+        PDDocument doc = PDDocument.load(new File(testResultsDir, filename));
+        PDImageXObject img =
+            (PDImageXObject) doc.getPage(0).getResources().getXObject(COSName.getPDFName("Im1"));
+        InputStream dctStream = img.createInputStream(Arrays.asList(COSName.DCT_DECODE.getName()));
+        ByteArrayOutputStream baos1 = new ByteArrayOutputStream();
+        ByteArrayOutputStream baos2 = new ByteArrayOutputStream();
+        IOUtils.copy(resourceStream, baos1);
+        IOUtils.copy(dctStream, baos2);
+        resourceStream.close();
+        dctStream.close();
+        assertArrayEquals(baos1.toByteArray(), baos2.toByteArray());
+        doc.close();
     }
 }

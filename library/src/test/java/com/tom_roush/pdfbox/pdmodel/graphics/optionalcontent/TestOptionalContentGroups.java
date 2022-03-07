@@ -16,29 +16,32 @@
  */
 package com.tom_roush.pdfbox.pdmodel.graphics.optionalcontent;
 
+import java.io.File;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.Set;
+
 import com.tom_roush.harmony.awt.AWTColor;
 import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.pdmodel.PDDocumentCatalog;
 import com.tom_roush.pdfbox.pdmodel.PDPage;
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream;
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode;
 import com.tom_roush.pdfbox.pdmodel.PDResources;
 import com.tom_roush.pdfbox.pdmodel.font.PDFont;
 import com.tom_roush.pdfbox.pdmodel.font.PDType1Font;
+import com.tom_roush.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentProperties.BaseState;
 
 import junit.framework.TestCase;
-
-import java.io.File;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Set;
 
 /**
  * Tests optional content group functionality (also called layers).
  */
 public class TestOptionalContentGroups extends TestCase
 {
-    private File testResultsDir = new File("target/test-output");
+    private final File testResultsDir = new File("target/test-output");
 
     @Override
     protected void setUp() throws Exception
@@ -49,7 +52,6 @@ public class TestOptionalContentGroups extends TestCase
 
     /**
      * Tests OCG generation.
-     *
      * @throws Exception if an error occurs
      */
     public void testOCGGeneration() throws Exception
@@ -61,10 +63,10 @@ public class TestOptionalContentGroups extends TestCase
             PDPage page = new PDPage();
             doc.addPage(page);
             PDResources resources = page.getResources();
-            if (resources == null)
+            if( resources == null )
             {
                 resources = new PDResources();
-                page.setResources(resources);
+                page.setResources( resources );
             }
 
             //Prepare OCG functionality
@@ -92,7 +94,7 @@ public class TestOptionalContentGroups extends TestCase
             assertFalse(ocprops.isGroupEnabled("disabled"));
 
             //Setup page content stream and paint background/title
-            PDPageContentStream contentStream = new PDPageContentStream(doc, page, false, false);
+            PDPageContentStream contentStream = new PDPageContentStream(doc, page, AppendMode.OVERWRITE, false);
             PDFont font = PDType1Font.HELVETICA_BOLD;
             contentStream.beginMarkedContent(COSName.OC, background);
             contentStream.beginText();
@@ -143,7 +145,6 @@ public class TestOptionalContentGroups extends TestCase
 
     /**
      * Tests OCG functions on a loaded PDF.
-     *
      * @throws Exception if an error occurs
      */
     public void testOCGConsumption() throws Exception
@@ -164,14 +165,14 @@ public class TestOptionalContentGroups extends TestCase
             PDResources resources = page.getResources();
 
             COSName mc0 = COSName.getPDFName("oc1");
-            PDOptionalContentGroup ocg = (PDOptionalContentGroup) resources.getProperties(mc0);
+            PDOptionalContentGroup ocg = (PDOptionalContentGroup)resources.getProperties(mc0);
             assertNotNull(ocg);
             assertEquals("background", ocg.getName());
 
             assertNull(resources.getProperties(COSName.getPDFName("inexistent")));
 
             PDOptionalContentProperties ocgs = catalog.getOCProperties();
-            assertEquals(PDOptionalContentProperties.BaseState.ON, ocgs.getBaseState());
+            assertEquals(BaseState.ON, ocgs.getBaseState());
             Set<String> names = new java.util.HashSet<String>(Arrays.asList(ocgs.getGroupNames()));
             assertEquals(3, names.size());
             assertTrue(names.contains("background"));
@@ -188,12 +189,94 @@ public class TestOptionalContentGroups extends TestCase
             assertNull(ocgs.getGroup("inexistent"));
 
             Collection<PDOptionalContentGroup> coll = ocgs.getOptionalContentGroups();
-            coll.contains(background);
-
+            assertEquals(3, coll.size());
+            Set<String> nameSet = new HashSet<String>();
+            for (PDOptionalContentGroup ocg2 : coll)
+            {
+                nameSet.add(ocg2.getName());
+            }
+            assertTrue(nameSet.contains("background"));
+            assertTrue(nameSet.contains("enabled"));
+            assertTrue(nameSet.contains("disabled"));
         }
         finally
         {
             doc.close();
         }
     }
+
+    public void testOCGsWithSameNameCanHaveDifferentVisibility() throws Exception
+    {
+        PDDocument doc = new PDDocument();
+        try
+        {
+            //Create new page
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            PDResources resources = page.getResources();
+            if( resources == null )
+            {
+                resources = new PDResources();
+                page.setResources( resources );
+            }
+
+            //Prepare OCG functionality
+            PDOptionalContentProperties ocprops = new PDOptionalContentProperties();
+            doc.getDocumentCatalog().setOCProperties(ocprops);
+            //ocprops.setBaseState(BaseState.ON); //ON=default
+
+            //Create visible OCG
+            PDOptionalContentGroup visible = new PDOptionalContentGroup("layer");
+            ocprops.addGroup(visible);
+            assertTrue(ocprops.isGroupEnabled(visible));
+
+            //Create invisible OCG
+            PDOptionalContentGroup invisible = new PDOptionalContentGroup("layer");
+            ocprops.addGroup(invisible);
+            assertFalse(ocprops.setGroupEnabled(invisible, false));
+            assertFalse(ocprops.isGroupEnabled(invisible));
+
+            //Check that visible layer is still visible
+            assertTrue(ocprops.isGroupEnabled(visible));
+
+            //Setup page content stream and paint background/title
+            PDPageContentStream contentStream = new PDPageContentStream(doc, page, AppendMode.OVERWRITE, false);
+            PDFont font = PDType1Font.HELVETICA_BOLD;
+            contentStream.beginMarkedContent(COSName.OC, visible);
+            contentStream.beginText();
+            contentStream.setFont(font, 14);
+            contentStream.newLineAtOffset(80, 700);
+            contentStream.showText("PDF 1.5: Optional Content Groups");
+            contentStream.endText();
+            font = PDType1Font.HELVETICA;
+            contentStream.beginText();
+            contentStream.setFont(font, 12);
+            contentStream.newLineAtOffset(80, 680);
+            contentStream.showText("You should see this text, but no red text line.");
+            contentStream.endText();
+            contentStream.endMarkedContent();
+
+            //Paint disabled layer
+            contentStream.beginMarkedContent(COSName.OC, invisible);
+            contentStream.setNonStrokingColor(AWTColor.RED);
+            contentStream.beginText();
+            contentStream.setFont(font, 12);
+            contentStream.newLineAtOffset(80, 500);
+            contentStream.showText(
+                "This is from a disabled layer. If you see this, that's NOT good!");
+            contentStream.endText();
+            contentStream.endMarkedContent();
+
+            contentStream.close();
+
+            File targetFile = new File(testResultsDir, "ocg-generation-same-name.pdf");
+            doc.save(targetFile.getAbsolutePath());
+        }
+        finally
+        {
+            doc.close();
+        }
+    }
+
+//    testOCGGenerationSameNameCanHaveSameVisibilityOff is an instrumentation test
 }

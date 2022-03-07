@@ -179,7 +179,7 @@ public class TestCOSFloat extends TestCOSNumber
         void runTest(float num)
         {
             COSFloat testFloat = new COSFloat(num);
-            // compare the string representation instead of the numeric values
+            // compare the string representation instead of the numeric values 
             // as the cast from float to double adds some more fraction digits
             assertEquals(Float.toString(num), Double.toString(testFloat.doubleValue()));
         }
@@ -262,7 +262,7 @@ public class TestCOSFloat extends TestCOSNumber
     {
         ByteArrayOutputStream outStream = new ByteArrayOutputStream();
 
-        public WritePDFTester()
+        WritePDFTester()
         {
             setLoop(-1000, 3000, 200);
         }
@@ -300,9 +300,16 @@ public class TestCOSFloat extends TestCOSNumber
         writePDFTester.runTest(0.000000000000000000000000000000001f);
     }
 
+    public void testDoubleNegative() throws IOException
+    {
+        // PDFBOX-4289
+        COSFloat cosFloat = new COSFloat("--16.33");
+        assertEquals(-16.33f, cosFloat.floatValue());
+    }
+
     private String floatToString(float value)
     {
-        // use a BigDecimal as intermediate state to avoid
+        // use a BigDecimal as intermediate state to avoid 
         // a floating point string representation of the float value
         return removeTrailingNull(new BigDecimal(String.valueOf(value)).toPlainString());
     }

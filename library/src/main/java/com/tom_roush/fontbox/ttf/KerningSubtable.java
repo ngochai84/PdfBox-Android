@@ -60,7 +60,7 @@ public class KerningSubtable
      * @param version The version of the table to be read
      * @throws IOException If there is an error reading the data.
      */
-    public void read(TTFDataStream data, int version) throws IOException
+    void read(TTFDataStream data, int version) throws IOException
     {
         if (version == 0)
         {
@@ -68,7 +68,6 @@ public class KerningSubtable
         }
         else if (version == 1)
         {
-
             readSubtable1(data);
         }
         else
@@ -93,7 +92,7 @@ public class KerningSubtable
      * Determine if subtable is designated for use in horizontal writing modes, contains
      * kerning pairs (as opposed to minimum pairs), and, if CROSS is true, then return
      * cross stream designator; otherwise, if CROSS is false, return true if cross stream
-     * esignator is false.
+     * designator is false.
      *
      * @param cross if true, then return cross stream designator in horizontal modes
      * @return true if subtable is for horizontal kerning in horizontal modes
@@ -153,8 +152,7 @@ public class KerningSubtable
         }
         else
         {
-            Log.w("PdfBox-Android",
-                "No kerning subtable data available due to an unsupported kerning subtable version");
+            Log.w("PdfBox-Android", "No kerning subtable data available due to an unsupported kerning subtable version");
         }
         return kerning;
     }
@@ -170,8 +168,8 @@ public class KerningSubtable
     {
         if (pairs == null)
         {
-            Log.w("PdfBox-Android",
-                "No kerning subtable data available due to an unsupported kerning subtable version");
+            Log.w("PdfBox-Android", "No kerning subtable data available due to an unsupported kerning subtable version");
+            return 0;
         }
         return pairs.getKerning(l, r);
     }
@@ -181,8 +179,8 @@ public class KerningSubtable
         int version = data.readUnsignedShort();
         if (version != 0)
         {
-            throw new UnsupportedOperationException("Unsupported kerning sub-table version: "
-                + version);
+            Log.i("PdfBox-Android", "Unsupported kerning sub-table version: " + version);
+            return;
         }
         int length = data.readUnsignedShort();
         if (length < 6)
@@ -214,8 +212,7 @@ public class KerningSubtable
         }
         else
         {
-            Log.d("PdfBox-Android", "Skipped kerning subtable due to an unsupported kerning" +
-                " subtable version: " + format);
+            Log.d("PdfBox-Android", "Skipped kerning subtable due to an unsupported kerning subtable version: " + format);
         }
     }
 
@@ -227,14 +224,12 @@ public class KerningSubtable
 
     private void readSubtable0Format2(TTFDataStream data) throws IOException
     {
-        throw new UnsupportedOperationException(
-            "Kerning table version 0 format 2 not yet supported.");
+        Log.i("PdfBox-Android", "Kerning subtable format 2 not yet supported.");
     }
 
     private void readSubtable1(TTFDataStream data) throws IOException
     {
-        throw new UnsupportedOperationException(
-            "Kerning table version 1 formats not yet supported.");
+        Log.i("PdfBox-Android", "Kerning subtable format 1 not yet supported.");
     }
 
     private static boolean isBitsSet(int bits, int mask, int shift)
@@ -247,14 +242,14 @@ public class KerningSubtable
         return (bits & mask) >> shift;
     }
 
-    private abstract static class PairData
+    private interface PairData
     {
-        public abstract void read(TTFDataStream data) throws IOException;
+        void read(TTFDataStream data) throws IOException;
 
-        public abstract int getKerning(int l, int r);
+        int getKerning(int l, int r);
     }
 
-    private static class PairData0Format0 extends PairData implements Comparator<int[]>
+    private static class PairData0Format0 implements Comparator<int[]>, PairData
     {
         private int searchRange;
         private int[][] pairs;
@@ -263,7 +258,7 @@ public class KerningSubtable
         public void read(TTFDataStream data) throws IOException
         {
             int numPairs = data.readUnsignedShort();
-            searchRange = data.readUnsignedShort() / 6;
+            searchRange = data.readUnsignedShort()/6;
             int entrySelector = data.readUnsignedShort();
             int rangeShift = data.readUnsignedShort();
             pairs = new int[numPairs][3];
@@ -281,17 +276,11 @@ public class KerningSubtable
         @Override
         public int getKerning(int l, int r)
         {
-            int[] key = new int[]{l, r, 0};
-            int index;
-            index = Arrays.binarySearch(pairs, 0, searchRange, key, this);
+            int[] key = new int[] { l, r, 0 };
+            int index = Arrays.binarySearch(pairs, key, this);
             if (index >= 0)
             {
                 return pairs[index][2];
-            }
-            index = Arrays.binarySearch(pairs, searchRange, pairs.length, key, this);
-            if (index >= 0)
-            {
-                return pairs[searchRange + index][2];
             }
             return 0;
         }

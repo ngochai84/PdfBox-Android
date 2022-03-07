@@ -22,7 +22,9 @@ import android.util.Log;
 import java.io.IOException;
 import java.util.List;
 
+import com.tom_roush.pdfbox.contentstream.operator.MissingOperandException;
 import com.tom_roush.pdfbox.contentstream.operator.Operator;
+import com.tom_roush.pdfbox.contentstream.operator.OperatorName;
 import com.tom_roush.pdfbox.cos.COSBase;
 import com.tom_roush.pdfbox.cos.COSNumber;
 
@@ -36,12 +38,20 @@ public class CurveTo extends GraphicsOperatorProcessor
     @Override
     public void process(Operator operator, List<COSBase> operands) throws IOException
     {
-        COSNumber x1 = (COSNumber) operands.get(0);
-        COSNumber y1 = (COSNumber) operands.get(1);
-        COSNumber x2 = (COSNumber) operands.get(2);
-        COSNumber y2 = (COSNumber) operands.get(3);
-        COSNumber x3 = (COSNumber) operands.get(4);
-        COSNumber y3 = (COSNumber) operands.get(5);
+        if (operands.size() < 6)
+        {
+            throw new MissingOperandException(operator, operands);
+        }
+        if (!checkArrayTypesClass(operands, COSNumber.class))
+        {
+            return;
+        }
+        COSNumber x1 = (COSNumber)operands.get(0);
+        COSNumber y1 = (COSNumber)operands.get(1);
+        COSNumber x2 = (COSNumber)operands.get(2);
+        COSNumber y2 = (COSNumber)operands.get(3);
+        COSNumber x3 = (COSNumber)operands.get(4);
+        COSNumber y3 = (COSNumber)operands.get(5);
 
         PointF point1 = context.transformedPoint(x1.floatValue(), y1.floatValue());
         PointF point2 = context.transformedPoint(x2.floatValue(), y2.floatValue());
@@ -55,14 +65,14 @@ public class CurveTo extends GraphicsOperatorProcessor
         else
         {
             context.curveTo(point1.x, point1.y,
-                    point2.x, point2.y,
-                    point3.x, point3.y);
+                point2.x, point2.y,
+                point3.x, point3.y);
         }
     }
 
     @Override
     public String getName()
     {
-        return "c";
+        return OperatorName.CURVE_TO;
     }
 }

@@ -18,17 +18,21 @@
 package com.tom_roush.pdfbox.rendering;
 
 import android.content.Context;
-import android.support.test.InstrumentationRegistry;
+import android.graphics.Bitmap;
 import android.util.Log;
 
+import androidx.test.platform.app.InstrumentationRegistry;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 import com.tom_roush.pdfbox.pdmodel.PDDocument;
-import com.tom_roush.pdfbox.util.PDFBoxResourceLoader;
 
 import org.junit.Before;
 import org.junit.Test;
-
-import java.io.IOException;
-import java.util.ArrayList;
 
 /**
  * Functional test for PDF rendering. This test simply tries to render
@@ -41,10 +45,11 @@ import java.util.ArrayList;
 public class TestRendering
 {
     private static final String INPUT_DIR = "pdfbox/input/rendering";
+    private static File OUT_DIR;
 
     Context testContext;
 
-    private boolean findAssetPDFs(String path, ArrayList pdfs)
+    private boolean findAssetPDFs(String path, ArrayList<String> pdfs)
     {
         try
         {
@@ -85,6 +90,8 @@ public class TestRendering
     {
         testContext = InstrumentationRegistry.getInstrumentation().getContext();
         PDFBoxResourceLoader.init(testContext);
+        OUT_DIR = new File(testContext.getCacheDir(), "pdfbox-test-output/rendering");
+        OUT_DIR.mkdirs();
     }
 
     @Test
@@ -108,8 +115,27 @@ public class TestRendering
     public void render(String fileName) throws IOException
     {
         PDDocument document = PDDocument.load(testContext.getAssets().open(fileName));
+        render(document, fileName.substring(fileName.lastIndexOf("/") + 1));
+    }
+
+    public void render(File file) throws IOException
+    {
+        PDDocument document = PDDocument.load(file);
+        render(document, file.getName());
+    }
+
+    private void render(PDDocument document, String name) throws IOException
+    {
         PDFRenderer renderer = new PDFRenderer(document);
-        renderer.renderImage(0);
+        for (int i = 0; i < document.getNumberOfPages(); i++)
+        {
+            Bitmap image = renderer.renderImage(i);
+
+            File renderFile = new File(OUT_DIR, name + "-" + (i + 1) + ".png");
+            FileOutputStream fileOut = new FileOutputStream(renderFile);
+            image.compress(Bitmap.CompressFormat.PNG, 100, fileOut);
+            fileOut.close();
+        }
 
         // We don't actually do anything with the image for the same reason that
         // TestPDFToImage is disabled - different JVMs produce different results
@@ -117,6 +143,6 @@ public class TestRendering
         // during the rendering process.
 
         document.close();
-        Log.e("PdfBox-Android", "Rendered " + fileName + " without dying");
+        Log.e("PdfBox-Android", "Rendered " + name + " without dying");
     }
 }

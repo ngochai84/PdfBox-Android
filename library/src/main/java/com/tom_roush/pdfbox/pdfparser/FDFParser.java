@@ -34,9 +34,9 @@ public class FDFParser extends COSParser
 {
     /**
      * Constructs parser for given file using memory buffer.
-     * 
+     *
      * @param filename the filename of the pdf to be parsed
-     * 
+     *
      * @throws IOException If something went wrong.
      */
     public FDFParser(String filename) throws IOException
@@ -47,9 +47,9 @@ public class FDFParser extends COSParser
     /**
      * Constructs parser for given file using given buffer for temporary
      * storage.
-     * 
+     *
      * @param file the pdf to be parsed
-     * 
+     *
      * @throws IOException If something went wrong.
      */
     public FDFParser(File file) throws IOException
@@ -61,7 +61,7 @@ public class FDFParser extends COSParser
 
     /**
      * Constructor.
-     * 
+     *
      * @param input input stream representing the pdf.
      * @throws IOException If something went wrong.
      */
@@ -70,6 +70,18 @@ public class FDFParser extends COSParser
         super(new RandomAccessBuffer(input));
         fileLen = source.length();
         init();
+    }
+
+    /**
+     * Tell if the dictionary is a FDF catalog.
+     *
+     * @param dictionary
+     * @return
+     */
+    @Override
+    protected final boolean isCatalog(COSDictionary dictionary)
+    {
+        return dictionary.containsKey(COSName.FDF);
     }
 
     private void init() throws IOException
@@ -83,59 +95,76 @@ public class FDFParser extends COSParser
             }
             catch (NumberFormatException nfe)
             {
-            	Log.w("PdfBox-Android", "System property " + SYSPROP_EOFLOOKUPRANGE
-            			+ " does not contain an integer value, but: '" + eofLookupRangeStr + "'");
+                Log.w("PdfBox-Android", "System property " + SYSPROP_EOFLOOKUPRANGE
+                    + " does not contain an integer value, but: '" + eofLookupRangeStr + "'");
             }
         }
-        document = new COSDocument(false);
+        document = new COSDocument();
     }
 
     /**
      * The initial parse will first parse only the trailer, the xrefstart and all xref tables to have a pointer (offset)
      * to all the pdf's objects. It can handle linearized pdfs, which will have an xref at the end pointing to an xref
      * at the beginning of the file. Last the root object is parsed.
-     * 
+     *
      * @throws IOException If something went wrong.
      */
     private void initialParse() throws IOException
     {
         COSDictionary trailer = null;
-        // parse startxref
-        long startXRefOffset = getStartxrefOffset();
-        if (startXRefOffset > 0)
+        boolean rebuildTrailer = false;
+        try
         {
-            trailer = parseXref(startXRefOffset);
+            // parse startxref
+            long startXRefOffset = getStartxrefOffset();
+            if (startXRefOffset > 0)
+            {
+                trailer = parseXref(startXRefOffset);
+            }
+            else if (isLenient())
+            {
+                rebuildTrailer = true;
+            }
         }
-        else
+        catch (IOException exception)
+        {
+            if (isLenient())
+            {
+                rebuildTrailer = true;
+            }
+            else
+            {
+                throw exception;
+            }
+        }
+        if (rebuildTrailer)
         {
             trailer = rebuildTrailer();
         }
-    
+
         COSBase rootObject = parseTrailerValuesDynamically(trailer);
-    
+
         // resolve all objects
         // A FDF doesn't have a catalog, all FDF fields are within the root object
         if (rootObject instanceof COSDictionary)
         {
             parseDictObjects((COSDictionary) rootObject, (COSName[]) null);
         }
-    
         initialParseDone = true;
     }
 
     /**
-     * This will parse the stream and populate the COSDocument object.  This will close
-     * the stream when it is done parsing.
+     * This will parse the stream and populate the COSDocument object.
      *
      * @throws IOException If there is an error reading from the stream or corrupt data
      * is found.
      */
     public void parse() throws IOException
     {
-         // set to false if all is processed
-         boolean exceptionOccurred = true; 
-         try
-         {
+        // set to false if all is processed
+        boolean exceptionOccurred = true;
+        try
+        {
             if (!parseFDFHeader())
             {
                 throw new IOException( "Error: Header doesn't contain versioninfo" );

@@ -19,6 +19,8 @@ package com.tom_roush.pdfbox.pdmodel.common;
 import android.graphics.Path;
 import android.graphics.PointF;
 
+import java.util.Arrays;
+
 import com.tom_roush.fontbox.util.BoundingBox;
 import com.tom_roush.pdfbox.cos.COSArray;
 import com.tom_roush.pdfbox.cos.COSBase;
@@ -30,12 +32,14 @@ import com.tom_roush.pdfbox.util.Matrix;
  * A rectangle in a PDF document.
  *
  * @author Ben Litchfield
- *
  */
 public class PDRectangle implements COSObjectable
 {
+    /** user space units per inch */
     private static final float POINTS_PER_INCH = 72;
-    private static final float MM_PER_INCH = 1 / (10 * 2.54f) * POINTS_PER_INCH;
+
+    /** user space units per millimeter */
+    private static final float POINTS_PER_MM = 1 / (10 * 2.54f) * POINTS_PER_INCH;
 
     /** A rectangle the size of U.S. Letter, 8.5" x 11". */
     public static final PDRectangle LETTER = new PDRectangle(8.5f * POINTS_PER_INCH,
@@ -44,25 +48,25 @@ public class PDRectangle implements COSObjectable
     public static final PDRectangle LEGAL = new PDRectangle(8.5f * POINTS_PER_INCH,
         14f * POINTS_PER_INCH);
     /**  A rectangle the size of A0 Paper. */
-    public static final PDRectangle A0 = new PDRectangle(841 * MM_PER_INCH, 1189 * MM_PER_INCH);
+    public static final PDRectangle A0 = new PDRectangle(841 * POINTS_PER_MM, 1189 * POINTS_PER_MM);
 
     /** A rectangle the size of A1 Paper. */
-    public static final PDRectangle A1 = new PDRectangle(594 * MM_PER_INCH, 841 * MM_PER_INCH);
+    public static final PDRectangle A1 = new PDRectangle(594 * POINTS_PER_MM, 841 * POINTS_PER_MM);
 
     /**  A rectangle the size of A2 Paper. */
-    public static final PDRectangle A2 = new PDRectangle(420 * MM_PER_INCH, 594 * MM_PER_INCH);
+    public static final PDRectangle A2 = new PDRectangle(420 * POINTS_PER_MM, 594 * POINTS_PER_MM);
 
     /** A rectangle the size of A3 Paper.  */
-    public static final PDRectangle A3 = new PDRectangle(297 * MM_PER_INCH, 420 * MM_PER_INCH);
+    public static final PDRectangle A3 = new PDRectangle(297 * POINTS_PER_MM, 420 * POINTS_PER_MM);
 
     /**  A rectangle the size of A4 Paper. */
-    public static final PDRectangle A4 = new PDRectangle(210 * MM_PER_INCH, 297 * MM_PER_INCH);
+    public static final PDRectangle A4 = new PDRectangle(210 * POINTS_PER_MM, 297 * POINTS_PER_MM);
 
     /** A rectangle the size of A5 Paper. */
-    public static final PDRectangle A5 = new PDRectangle(148 * MM_PER_INCH, 210 * MM_PER_INCH);
+    public static final PDRectangle A5 = new PDRectangle(148 * POINTS_PER_MM, 210 * POINTS_PER_MM);
 
     /**  A rectangle the size of A6 Paper. */
-    public static final PDRectangle A6 = new PDRectangle(105 * MM_PER_INCH, 148 * MM_PER_INCH);
+    public static final PDRectangle A6 = new PDRectangle(105 * POINTS_PER_MM, 148 * POINTS_PER_MM);
 
     private final COSArray rectArray;
 
@@ -125,7 +129,7 @@ public class PDRectangle implements COSObjectable
      */
     public PDRectangle( COSArray array )
     {
-        float[] values = array.toFloatArray();
+        float[] values = Arrays.copyOf(array.toFloatArray(), 4);
         rectArray = new COSArray();
         // we have to start with the lower left corner
         rectArray.add( new COSFloat( Math.min(values[0],values[2] )) );
@@ -153,8 +157,8 @@ public class PDRectangle implements COSObjectable
     /**
      * This will create a translated rectangle based off of this rectangle, such
      * that the new rectangle retains the same dimensions(height/width), but the
-     * lower left x,y values are zero. <br />
-     * 100, 100, 400, 400 (llx, lly, urx, ury ) <br />
+     * lower left x,y values are zero. <br>
+     * 100, 100, 400, 400 (llx, lly, urx, ury ) <br>
      * will be translated to 0,0,300,300
      *
      * @return A new rectangle that has been translated back to the origin.
@@ -280,21 +284,12 @@ public class PDRectangle implements COSObjectable
     }
 
     /**
-     * This will move the rectangle the given relative amount.
+     * Returns a path which represents this rectangle having been transformed by the given matrix. Note that the
+     * resulting path need not be rectangular.
      *
-     * @param horizontalAmount positive values will move rectangle to the right, negative's to the left.
-     * @param verticalAmount positive values will move the rectangle up, negative's down.
-     */
-    public void move(float horizontalAmount, float verticalAmount)
-    {
-        setUpperRightX(getUpperRightX() + horizontalAmount);
-        setLowerLeftX(getLowerLeftX() + horizontalAmount);
-        setUpperRightY(getUpperRightY() + verticalAmount);
-        setLowerLeftY(getLowerLeftY() + verticalAmount);
-    }
-
-    /**
-     * Returns a copy of this rectangle which has been transformed using the given matrix.
+     * @param matrix the matrix to be used for the transformation.
+     *
+     * @return the resulting path.
      */
     public Path transform(Matrix matrix)
     {
@@ -329,8 +324,10 @@ public class PDRectangle implements COSObjectable
     }
 
     /**
-     * Returns a general path equivalent to this rectangle. This method avoids the problems
-     * caused by Rectangle2D not working well with -ve rectangles.
+     * Returns a general path equivalent to this rectangle. This method avoids the problems caused by Rectangle2D not
+     * working well with -ve rectangles.
+     *
+     * @return the general path.
      */
     public Path toGeneralPath()
     {

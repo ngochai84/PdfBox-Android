@@ -1,6 +1,6 @@
 /*
  * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
+ * contributor license agreements. See the NOTICE file distributed with
  * this work for additional information regarding copyright ownership.
  * The ASF licenses this file to You under the Apache License, Version 2.0
  * (the "License"); you may not use this file except in compliance with
@@ -36,7 +36,7 @@ public class FDFAnnotationCircle extends FDFAnnotation
     /**
      * COS Model value for SubType entry.
      */
-    public static final String SUBTYPE ="Circle";
+    public static final String SUBTYPE = "Circle";
 
     /**
      * Default constructor.
@@ -44,7 +44,7 @@ public class FDFAnnotationCircle extends FDFAnnotation
     public FDFAnnotationCircle()
     {
         super();
-        annot.setName( COSName.SUBTYPE, SUBTYPE );
+        annot.setName(COSName.SUBTYPE, SUBTYPE);
     }
 
     /**
@@ -52,19 +52,19 @@ public class FDFAnnotationCircle extends FDFAnnotation
      *
      * @param a An existing FDF Annotation.
      */
-    public FDFAnnotationCircle( COSDictionary a )
+    public FDFAnnotationCircle(COSDictionary a)
     {
-        super( a );
+        super(a);
     }
 
     /**
      * Constructor.
      *
-     *  @param element An XFDF element.
+     * @param element An XFDF element.
      *
-     *  @throws IOException If there is an error extracting information from the element.
+     * @throws IOException If there is an error extracting information from the element.
      */
-    public FDFAnnotationCircle( Element element ) throws IOException
+    public FDFAnnotationCircle(Element element) throws IOException
     {
         super(element);
         annot.setName(COSName.SUBTYPE, SUBTYPE);
@@ -76,6 +76,11 @@ public class FDFAnnotationCircle extends FDFAnnotation
             setInteriorColor(new AWTColor(colorValue));
         }
 
+        initFringe(element);
+    }
+
+    private void initFringe(Element element) throws IOException
+    {
         String fringe = element.getAttribute("fringe");
         if (fringe != null && !fringe.isEmpty())
         {
@@ -84,14 +89,12 @@ public class FDFAnnotationCircle extends FDFAnnotation
             {
                 throw new IOException("Error: wrong amount of numbers in attribute 'fringe'");
             }
-            float[] values = new float[4];
-            for (int i = 0; i < 4; i++)
-            {
-                values[i] = Float.parseFloat(fringeValues[i]);
-            }
-            COSArray array = new COSArray();
-            array.setFloatArray(values);
-            setFringe(new PDRectangle(array));
+            PDRectangle rect = new PDRectangle();
+            rect.setLowerLeftX(Float.parseFloat(fringeValues[0]));
+            rect.setLowerLeftY(Float.parseFloat(fringeValues[1]));
+            rect.setUpperRightX(Float.parseFloat(fringeValues[2]));
+            rect.setUpperRightY(Float.parseFloat(fringeValues[3]));
+            setFringe(rect);
         }
     }
 
@@ -100,7 +103,7 @@ public class FDFAnnotationCircle extends FDFAnnotation
      *
      * @param color The interior color of the circle.
      */
-    public void setInteriorColor(AWTColor color)
+    public final void setInteriorColor(AWTColor color)
     {
         COSArray array = null;
         if (color != null)
@@ -138,7 +141,7 @@ public class FDFAnnotationCircle extends FDFAnnotation
      *
      * @param fringe the fringe
      */
-    public void setFringe(PDRectangle fringe)
+    public final void setFringe(PDRectangle fringe)
     {
         annot.setItem(COSName.RD, fringe);
     }

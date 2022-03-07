@@ -14,7 +14,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package com.tom_roush.pdfbox.pdmodel.font;
+
+import android.graphics.Path;
+import android.graphics.RectF;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -26,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.tom_roush.fontbox.ttf.CmapLookup;
 import com.tom_roush.fontbox.ttf.CmapSubtable;
 import com.tom_roush.fontbox.ttf.HeaderTable;
 import com.tom_roush.fontbox.ttf.HorizontalHeaderTable;
@@ -50,36 +55,59 @@ import com.tom_roush.pdfbox.pdmodel.common.PDStream;
 abstract class TrueTypeEmbedder implements Subsetter
 {
     private static final int ITALIC = 1;
-    private static final int OBLIQUE = 256;
+    private static final int OBLIQUE = 512;
     private static final String BASE25 = "BCDEFGHIJKLMNOPQRSTUVWXYZ";
 
     private final PDDocument document;
     protected TrueTypeFont ttf;
     protected PDFontDescriptor fontDescriptor;
+
+    /**
+     * For API backwards compatibility.
+     *
+     * @deprecated
+     */
+    @Deprecated
     protected final CmapSubtable cmap;
+
+    protected final CmapLookup cmapLookup;
     private final Set<Integer> subsetCodePoints = new HashSet<Integer>();
     private final boolean embedSubset;
 
     /**
      * Creates a new TrueType font for embedding.
      */
-    TrueTypeEmbedder(PDDocument document, COSDictionary dict, InputStream ttfStream,
+    TrueTypeEmbedder(PDDocument document, COSDictionary dict, TrueTypeFont ttf,
         boolean embedSubset) throws IOException
     {
         this.document = document;
         this.embedSubset = embedSubset;
+        this.ttf = ttf;
+        fontDescriptor = createFontDescriptor(ttf);
 
-        buildFontFile2(ttfStream);
+        if (!isEmbeddingPermitted(ttf))
+        {
+            throw new IOException("This font does not permit embedding");
+        }
+
+        if (!embedSubset)
+        {
+            // full embedding
+            PDStream stream = new PDStream(document, ttf.getOriginalData(), COSName.FLATE_DECODE);
+            stream.getCOSObject().setLong(COSName.LENGTH1, ttf.getOriginalDataSize());
+            fontDescriptor.setFontFile2(stream);
+        }
+
         dict.setName(COSName.BASE_FONT, ttf.getName());
 
         // choose a Unicode "cmap"
         cmap = ttf.getUnicodeCmap();
+        cmapLookup = ttf.getUnicodeCmapLookup();
     }
 
     public void buildFontFile2(InputStream ttfStream) throws IOException
     {
         PDStream stream = new PDStream(document, ttfStream, COSName.FLATE_DECODE);
-        stream.getStream().setInt(COSName.LENGTH1, stream.toByteArray().length);
 
         // as the stream was closed within the PDStream constructor, we have to recreate it
         InputStream input = null;
@@ -100,7 +128,7 @@ abstract class TrueTypeEmbedder implements Subsetter
         {
             IOUtils.closeQuietly(input);
         }
-
+        stream.getCOSObject().setLong(COSName.LENGTH1, ttf.getOriginalDataSize());
         fontDescriptor.setFontFile2(stream);
     }
 
@@ -163,8 +191,7 @@ abstract class TrueTypeEmbedder implements Subsetter
             ttf.getHorizontalHeader().getNumberOfHMetrics() == 1);
 
         int fsSelection = os2.getFsSelection();
-        fd.setItalic((fsSelection & ITALIC) == fsSelection ||
-            (fsSelection & OBLIQUE) == fsSelection);
+        fd.setItalic(((fsSelection & (ITALIC | OBLIQUE)) != 0));
 
         switch (os2.getFamilyClass())
         {
@@ -177,6 +204,8 @@ abstract class TrueTypeEmbedder implements Subsetter
                 break;
             case OS2WindowsMetricsTable.FAMILY_CLASS_SCRIPTS:
                 fd.setScript(true);
+                break;
+            default:
                 break;
         }
 
@@ -211,11 +240,30 @@ abstract class TrueTypeEmbedder implements Subsetter
         }
         else
         {
-            // estimate by summing the typographical +ve ascender and -ve descender
-            fd.setCapHeight((os2.getTypoAscender() + os2.getTypoDescender()) * scaling);
-
-            // estimate by halving the typographical ascender
-            fd.setXHeight(os2.getTypoAscender() / 2.0f * scaling);
+            Path capHPath = ttf.getPath("H");
+            if (capHPath != null)
+            {
+                RectF capHPathBounds = new RectF();
+                capHPath.computeBounds(capHPathBounds, true);
+                fd.setCapHeight(Math.round(capHPathBounds.bottom) * scaling);
+            }
+            else
+            {
+                // estimate by summing the typographical +ve ascender and -ve descender
+                fd.setCapHeight((os2.getTypoAscender() + os2.getTypoDescender()) * scaling);
+            }
+            Path xPath = ttf.getPath("x");
+            if (xPath != null)
+            {
+                RectF xPathBounds = new RectF();
+                xPath.computeBounds(xPathBounds, true);
+                fd.setXHeight(Math.round(xPathBounds.bottom) * scaling);
+            }
+            else
+            {
+                // estimate by halving the typographical ascender
+                fd.setXHeight(os2.getTypoAscender() / 2.0f * scaling);
+            }
         }
 
         // StemV - there's no true TTF equivalent of this, so we estimate it
@@ -226,7 +274,10 @@ abstract class TrueTypeEmbedder implements Subsetter
 
     /**
      * Returns the FontBox font.
+     *
+     * @deprecated
      */
+    @Deprecated
     public TrueTypeFont getTrueTypeFont()
     {
         return ttf;
@@ -274,7 +325,7 @@ abstract class TrueTypeEmbedder implements Subsetter
         tables.add("gasp");
 
         // set the GIDs to subset
-        TTFSubsetter subsetter = new TTFSubsetter(getTrueTypeFont(), tables);
+        TTFSubsetter subsetter = new TTFSubsetter(ttf, tables);
         subsetter.addAll(subsetCodePoints);
 
         // calculate deterministic tag based on the chosen subset
@@ -288,6 +339,7 @@ abstract class TrueTypeEmbedder implements Subsetter
 
         // re-build the embedded font
         buildSubset(new ByteArrayInputStream(out.toByteArray()), tag, gidToCid);
+        ttf.close();
     }
 
     /**

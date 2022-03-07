@@ -16,6 +16,8 @@
  */
 package com.tom_roush.pdfbox.multipdf;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.Arrays;
@@ -33,6 +35,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.pdmodel.PDDocumentCatalog;
 import com.tom_roush.pdfbox.pdmodel.PDPage;
 import com.tom_roush.pdfbox.pdmodel.PDPageContentStream;
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode;
 import com.tom_roush.pdfbox.pdmodel.PDResources;
 import com.tom_roush.pdfbox.pdmodel.common.PDRectangle;
 import com.tom_roush.pdfbox.pdmodel.common.PDStream;
@@ -42,8 +45,9 @@ import com.tom_roush.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentPr
 import com.tom_roush.pdfbox.util.Matrix;
 
 /**
- * This class allows to import pages as Form XObjects into a PDF file and use them to create
- * layers (optional content groups).
+ * This class allows to import pages as Form XObjects into a document and use them to create layers
+ * (optional content groups). It should used only on loaded documents, not on generated documents
+ * because these can contain unfinished parts, e.g. font subsetting information.
  */
 public class LayerUtility
 {
@@ -121,6 +125,10 @@ public class LayerUtility
     /**
      * Imports a page from some PDF file as a Form XObject so it can be placed on another page
      * in the target document.
+     * <p>
+     * You may want to call {@link #wrapInSaveRestore(PDPage) wrapInSaveRestore(PDPage)} before invoking the Form XObject to
+     * make sure that the graphics state is reset.
+     *
      * @param sourceDoc the source PDF document that contains the page to be copied
      * @param pageNumber the page number of the page to be copied
      * @return a Form XObject containing the original page's content
@@ -138,6 +146,10 @@ public class LayerUtility
     /**
      * Imports a page from some PDF file as a Form XObject so it can be placed on another page
      * in the target document.
+     * <p>
+     * You may want to call {@link #wrapInSaveRestore(PDPage) wrapInSaveRestore(PDPage)} before invoking the Form XObject to
+     * make sure that the graphics state is reset.
+     *
      * @param sourceDoc the source PDF document that contains the page to be copied
      * @param page the page in the source PDF document to be copied
      * @return a Form XObject containing the original page's content
@@ -145,6 +157,8 @@ public class LayerUtility
      */
     public PDFormXObject importPageAsForm(PDDocument sourceDoc, PDPage page) throws IOException
     {
+        importOcProperties(sourceDoc);
+
         PDStream newStream = new PDStream(targetDoc, page.getContents(), COSName.FLATE_DECODE);
         PDFormXObject form = new PDFormXObject(newStream);
 
@@ -155,7 +169,7 @@ public class LayerUtility
         form.setResources(formRes);
 
         //Transfer some values from page to form
-        transferDict(page.getCOSObject(), form.getCOSStream(), PAGE_TO_FORM_FILTER, true);
+        transferDict(page.getCOSObject(), form.getCOSObject(), PAGE_TO_FORM_FILTER, true);
 
         Matrix matrix = form.getMatrix();
         AffineTransform at = matrix.createAffineTransform();
@@ -175,16 +189,17 @@ public class LayerUtility
             case 90:
                 at.scale(viewBox.getWidth() / viewBox.getHeight(), viewBox.getHeight() / viewBox.getWidth());
                 at.translate(0, viewBox.getWidth());
-                at.rotate((float)(-Math.PI / 2.0));
+                at.rotate(-Math.PI / 2.0);
                 break;
             case 180:
                 at.translate(viewBox.getWidth(), viewBox.getHeight());
-                at.rotate((float)-Math.PI);
+                at.rotate(-Math.PI);
                 break;
             case 270:
                 at.scale(viewBox.getWidth() / viewBox.getHeight(), viewBox.getHeight() / viewBox.getWidth());
                 at.translate(viewBox.getHeight(), 0);
-                at.rotate((float)(-Math.PI * 1.5));
+                at.rotate(-Math.PI * 1.5);
+                break;
             default:
                 //no additional transformations necessary
         }
@@ -210,9 +225,15 @@ public class LayerUtility
      * The form is enveloped in a marked content section to indicate that it's part of an
      * optional content group (OCG), here used as a layer. This optional group is returned and
      * can be enabled and disabled through methods on {@link PDOptionalContentProperties}.
+     * <p>
+     * You may want to call {@link #wrapInSaveRestore(PDPage) wrapInSaveRestore(PDPage)} before calling this method to make
+     * sure that the graphics state is reset.
+     *
      * @param targetPage the target page
      * @param form the form to place
-     * @param transform the transformation matrix that controls the placement
+     * @param transform the transformation matrix that controls the placement of your form. You'll
+     * need this if your page has a crop box different than the media box, or if these have negative
+     * coordinates, or if you want to scale or adjust your form.
      * @param layerName the name for the layer/OCG to produce
      * @return the optional content group that was generated for the form usage
      * @throws IOException if an I/O error occurs
@@ -233,11 +254,19 @@ public class LayerUtility
             throw new IllegalArgumentException("Optional group (layer) already exists: " + layerName);
         }
 
+        PDRectangle cropBox = targetPage.getCropBox();
+        if ((cropBox.getLowerLeftX() < 0 || cropBox.getLowerLeftY() < 0) && transform.isIdentity())
+        {
+            // PDFBOX-4044 
+            Log.w("PdfBox-Android", "Negative cropBox " + cropBox +
+                " and identity transform may make your form invisible");
+        }
+
         PDOptionalContentGroup layer = new PDOptionalContentGroup(layerName);
         ocprops.addGroup(layer);
 
         PDPageContentStream contentStream = new PDPageContentStream(
-            targetDoc, targetPage, true, !DEBUG);
+            targetDoc, targetPage, AppendMode.APPEND, !DEBUG);
         contentStream.beginMarkedContent(COSName.OC, layer);
         contentStream.saveGraphicsState();
         contentStream.transform(new Matrix(transform));
@@ -265,6 +294,36 @@ public class LayerUtility
             }
             targetDict.setItem(key,
                 cloner.cloneForNewDocument(entry.getValue()));
+        }
+    }
+
+    /**
+     * Imports OCProperties from source document to target document so hidden layers can still be
+     * hidden after import.
+     *
+     * @param sourceDoc The source PDF document that contains the /OCProperties to be copied.
+     * @throws IOException If an I/O error occurs.
+     */
+    private void importOcProperties(PDDocument srcDoc) throws IOException
+    {
+        PDDocumentCatalog srcCatalog = srcDoc.getDocumentCatalog();
+        PDOptionalContentProperties srcOCProperties = srcCatalog.getOCProperties();
+        if (srcOCProperties == null)
+        {
+            return;
+        }
+
+        PDDocumentCatalog dstCatalog = targetDoc.getDocumentCatalog();
+        PDOptionalContentProperties dstOCProperties = dstCatalog.getOCProperties();
+
+        if (dstOCProperties == null)
+        {
+            dstCatalog.setOCProperties(new PDOptionalContentProperties(
+                (COSDictionary) cloner.cloneForNewDocument(srcOCProperties)));
+        }
+        else
+        {
+            cloner.cloneMerge(srcOCProperties, dstOCProperties);
         }
     }
 }

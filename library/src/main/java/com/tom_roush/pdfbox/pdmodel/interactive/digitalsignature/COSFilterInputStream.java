@@ -17,11 +17,15 @@
 package com.tom_roush.pdfbox.pdmodel.interactive.digitalsignature;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import com.tom_roush.pdfbox.io.IOUtils;
 
+/**
+ * A filtered stream that includes the bytes that are in the (begin,length) intervals passed in the
+ * constructor.
+ */
 public class COSFilterInputStream extends FilterInputStream
 {
     private final int[] byteRange;
@@ -75,7 +79,7 @@ public class COSFilterInputStream extends FilterInputStream
         int i = 1;
         try
         {
-            for (; i < len ; i++)
+            for (; i < len; i++)
             {
                 c = read();
                 if (c == -1)
@@ -118,13 +122,6 @@ public class COSFilterInputStream extends FilterInputStream
 
     public byte[] toByteArray() throws IOException
     {
-        ByteArrayOutputStream byteOS = new ByteArrayOutputStream();
-        byte[] buffer = new byte[1024];
-        int c;
-        while ((c = this.read(buffer)) != -1)
-        {
-            byteOS.write(buffer, 0, c);
-        }
-        return byteOS.toByteArray();
+        return IOUtils.toByteArray(this);
     }
 }

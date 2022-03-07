@@ -46,7 +46,7 @@ See PDF 32000 p111
 
 When doing this all methods on PDFormXObject should probably be made
 final and all fields private.
- */
+*/
 
 /**
  * A Form XObject.
@@ -55,7 +55,7 @@ final and all fields private.
  */
 public class PDFormXObject extends PDXObject implements PDContentStream
 {
-    private PDGroup group;
+    private PDTransparencyGroupAttributes group;
     private final ResourceCache cache;
 
     /**
@@ -80,7 +80,6 @@ public class PDFormXObject extends PDXObject implements PDContentStream
 
     /**
      * Creates a Form XObject for reading.
-     *
      * @param stream The XObject stream
      */
     public PDFormXObject(COSStream stream, ResourceCache cache)
@@ -105,7 +104,7 @@ public class PDFormXObject extends PDXObject implements PDContentStream
      */
     public int getFormType()
     {
-        return getCOSStream().getInt(COSName.FORMTYPE, 1);
+        return getCOSObject().getInt(COSName.FORMTYPE, 1);
     }
 
     /**
@@ -114,22 +113,22 @@ public class PDFormXObject extends PDXObject implements PDContentStream
      */
     public void setFormType(int formType)
     {
-        getCOSStream().setInt(COSName.FORMTYPE, formType);
+        getCOSObject().setInt(COSName.FORMTYPE, formType);
     }
 
     /**
-     * Returns the group attributes dictionary (Group XObject).
+     * Returns the group attributes dictionary.
      *
      * @return the group attributes dictionary
      */
-    public PDGroup getGroup()
+    public PDTransparencyGroupAttributes getGroup()
     {
         if( group == null )
         {
-            COSDictionary dic = (COSDictionary) getCOSStream().getDictionaryObject(COSName.GROUP);
+            COSDictionary dic = (COSDictionary) getCOSObject().getDictionaryObject(COSName.GROUP);
             if( dic != null )
             {
-                group = new PDGroup(dic);
+                group = new PDTransparencyGroupAttributes(dic);
             }
         }
         return group;
@@ -137,28 +136,35 @@ public class PDFormXObject extends PDXObject implements PDContentStream
 
     public PDStream getContentStream()
     {
-        return new PDStream(getCOSStream());
+        return new PDStream(getCOSObject());
     }
 
     @Override
     public InputStream getContents() throws IOException
     {
-        return getCOSStream().getUnfilteredStream();
+        return getCOSObject().createInputStream();
     }
 
     /**
-     * This will get the resources at this page and not look up the hierarchy.
-     * This attribute is inheritable, and findResources() should probably used.
-     * This will return null if no resources are available at this level.
-     * @return The resources at this level in the hierarchy.
+     * This will get the resources for this Form XObject.
+     * This will return null if no resources are available.
+     *
+     * @return The resources for this Form XObject.
      */
     @Override
     public PDResources getResources()
     {
-        COSDictionary resources = (COSDictionary) getCOSStream().getDictionaryObject(COSName.RESOURCES);
+        COSDictionary resources = getCOSObject().getCOSDictionary(COSName.RESOURCES);
         if (resources != null)
         {
             return new PDResources(resources, cache);
+        }
+        if (getCOSObject().containsKey(COSName.RESOURCES))
+        {
+            // PDFBOX-4372 if the resource key exists but has nothing, return empty resources,
+            // to avoid a self-reference (xobject form Fm0 contains "/Fm0 Do")
+            // See also the mention of PDFBOX-1359 in PDFStreamEngine
+            return new PDResources();
         }
         return null;
     }
@@ -169,7 +175,7 @@ public class PDFormXObject extends PDXObject implements PDContentStream
      */
     public void setResources(PDResources resources)
     {
-        getCOSStream().setItem(COSName.RESOURCES, resources);
+        getCOSObject().setItem(COSName.RESOURCES, resources);
     }
 
     /**
@@ -183,7 +189,7 @@ public class PDFormXObject extends PDXObject implements PDContentStream
     public PDRectangle getBBox()
     {
         PDRectangle retval = null;
-        COSArray array = (COSArray) getCOSStream().getDictionaryObject(COSName.BBOX);
+        COSArray array = (COSArray) getCOSObject().getDictionaryObject(COSName.BBOX);
         if (array != null)
         {
             retval = new PDRectangle(array);
@@ -199,29 +205,22 @@ public class PDFormXObject extends PDXObject implements PDContentStream
     {
         if (bbox == null)
         {
-            getCOSStream().removeItem(COSName.BBOX);
+            getCOSObject().removeItem(COSName.BBOX);
         }
         else
         {
-            getCOSStream().setItem(COSName.BBOX, bbox.getCOSArray());
+            getCOSObject().setItem(COSName.BBOX, bbox.getCOSArray());
         }
     }
 
     /**
-     * This will get the optional Matrix of an XObjectForm. It maps the form space to user space.
+     * This will get the optional matrix of an XObjectForm. It maps the form space to user space.
      * @return the form matrix if available, or the identity matrix.
      */
     @Override
     public Matrix getMatrix()
     {
-        COSArray array = (COSArray) getCOSStream().getDictionaryObject(COSName.MATRIX);
-        if (array != null)
-        {
-            return new Matrix(array);
-        } else {
-            // default value is the identity matrix
-            return new Matrix();
-        }
+        return Matrix.createMatrix(getCOSObject().getDictionaryObject(COSName.MATRIX));
     }
 
     /**
@@ -237,18 +236,19 @@ public class PDFormXObject extends PDXObject implements PDContentStream
         {
             matrix.add(new COSFloat((float) v));
         }
-        getCOSStream().setItem(COSName.MATRIX, matrix);
+        getCOSObject().setItem(COSName.MATRIX, matrix);
     }
 
     /**
-     * This will get the key of this XObjectForm in the structural parent tree.
-     * Required if the form XObject contains marked-content sequences that are
-     * structural content items.
-     * @return the integer key of the XObjectForm's entry in the structural parent tree
+     * This will get the key of this XObjectForm in the structural parent tree. Required if the form
+     * XObject contains marked-content sequences that are structural content items.
+     *
+     * @return the integer key of the XObjectForm's entry in the structural parent tree or -1 if
+     * there isn't any.
      */
     public int getStructParents()
     {
-        return getCOSStream().getInt(COSName.STRUCT_PARENTS, 0);
+        return getCOSObject().getInt(COSName.STRUCT_PARENTS);
     }
 
     /**
@@ -257,6 +257,6 @@ public class PDFormXObject extends PDXObject implements PDContentStream
      */
     public void setStructParents(int structParent)
     {
-        getCOSStream().setInt(COSName.STRUCT_PARENTS, structParent);
+        getCOSObject().setInt(COSName.STRUCT_PARENTS, structParent);
     }
 }

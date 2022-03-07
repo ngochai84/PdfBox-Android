@@ -24,8 +24,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
-import com.tom_roush.pdfbox.util.PDFBoxResourceLoader;
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader;
 
 /**
  * PostScript glyph list, maps glyph names to sequences of Unicode characters.
@@ -34,29 +35,31 @@ import com.tom_roush.pdfbox.util.PDFBoxResourceLoader;
 public final class GlyphList
 {
     // Adobe Glyph List (AGL)
-    private static final GlyphList DEFAULT = load("glyphlist.txt");
+    private static final GlyphList DEFAULT = load("glyphlist.txt", 4281);
 
     // Zapf Dingbats has its own glyph list
-    private static final GlyphList ZAPF_DINGBATS = load("zapfdingbats.txt");
+    private static final GlyphList ZAPF_DINGBATS = load("zapfdingbats.txt",201);
 
     /**
      * Loads a glyph list from disk.
      */
-    private static GlyphList load(String filename)
+    private static GlyphList load(String filename, int numberOfEntries)
     {
+        String path = "com/tom_roush/pdfbox/resources/glyphlist/";
         try
         {
-            String path = "com/tom_roush/pdfbox/resources/glyphlist/";
+            String resourcePath = path + filename;
+            InputStream resourceStream;
             if (PDFBoxResourceLoader.isReady())
             {
-                return new GlyphList(PDFBoxResourceLoader.getStream(path + filename));
+                resourceStream = PDFBoxResourceLoader.getStream(resourcePath);
             }
             else
             {
                 // Fallback
-                ClassLoader loader = GlyphList.class.getClassLoader();
-                return new GlyphList(loader.getResourceAsStream(path + filename));
+                resourceStream = GlyphList.class.getResourceAsStream("/" + resourcePath);
             }
+            return new GlyphList(resourceStream, numberOfEntries);
         }
         catch (IOException e)
         {
@@ -76,7 +79,7 @@ public final class GlyphList
                     + "use GlyphList.DEFAULT.addGlyphs(Properties) instead");
             }
         }
-        catch (SecurityException e) // can occur on System.getProperty
+        catch (SecurityException e)  // can occur on System.getProperty
         {
             // PDFBOX-1946 ignore and continue
         }
@@ -103,20 +106,22 @@ public final class GlyphList
     private final Map<String, String> unicodeToName;
 
     // additional read/write cache for uniXXXX names
-    private final Map<String, String> uniNameToUnicodeCache = new HashMap<String, String>();
+    private final Map<String, String> uniNameToUnicodeCache = new ConcurrentHashMap<String, String>();
 
     /**
      * Creates a new GlyphList from a glyph list file.
      *
+     * @param numberOfEntries number of expected values used to preallocate the correct amount of memory
      * @param input glyph list in Adobe format
      * @throws IOException if the glyph list could not be read
      */
-    public GlyphList(InputStream input) throws IOException
+    public GlyphList(InputStream input, int numberOfEntries) throws IOException
     {
-        nameToUnicode = new HashMap<String, String>();
-        unicodeToName = new HashMap<String, String>();
+        nameToUnicode = new HashMap<String, String>(numberOfEntries);
+        unicodeToName = new HashMap<String, String>(numberOfEntries);
         loadList(input);
     }
+
     /**
      * Creates a new GlyphList from multiple glyph list files.
      *
@@ -136,23 +141,26 @@ public final class GlyphList
         BufferedReader in = new BufferedReader(new InputStreamReader(input, "ISO-8859-1"));
         try
         {
-            String line = null;
-            while ((line = in.readLine()) != null)
+            while (in.ready())
             {
-                if (!line.startsWith("#"))
+                String line = in.readLine();
+                if (line != null && !line.startsWith("#"))
                 {
                     String[] parts = line.split(";");
                     if (parts.length < 2)
                     {
                         throw new IOException("Invalid glyph list entry: " + line);
                     }
+
                     String name = parts[0];
                     String[] unicodeList = parts[1].split(" ");
+
                     if (nameToUnicode.containsKey(name))
                     {
                         Log.w("PdfBox-Android", "duplicate value for " + name + " -> " + parts[1] + " " +
                             nameToUnicode.get(name));
                     }
+
                     int[] codePoints = new int[unicodeList.length];
                     int index = 0;
                     for (String hex : unicodeList)
@@ -160,10 +168,20 @@ public final class GlyphList
                         codePoints[index++] = Integer.parseInt(hex, 16);
                     }
                     String string = new String(codePoints, 0 , codePoints.length);
+
                     // forward mapping
                     nameToUnicode.put(name, string);
+
                     // reverse mapping
-                    if (!unicodeToName.containsKey(string))
+                    // PDFBOX-3884: take the various standard encodings as canonical, 
+                    // e.g. tilde over ilde
+                    final boolean forceOverride =
+                        WinAnsiEncoding.INSTANCE.contains(name) ||
+                            MacRomanEncoding.INSTANCE.contains(name) ||
+                            MacExpertEncoding.INSTANCE.contains(name) ||
+                            SymbolEncoding.INSTANCE.contains(name) ||
+                            ZapfDingbatsEncoding.INSTANCE.contains(name);
+                    if (!unicodeToName.containsKey(string) || forceOverride)
                     {
                         unicodeToName.put(string, name);
                     }
@@ -282,7 +300,11 @@ public final class GlyphList
                     Log.w("PdfBox-Android", "Not a number in Unicode character name: " + name);
                 }
             }
-            uniNameToUnicodeCache.put(name, unicode);
+            if (unicode != null)
+            {
+                // null value not allowed in ConcurrentHashMap
+                uniNameToUnicodeCache.put(name, unicode);
+            }
         }
         return unicode;
     }

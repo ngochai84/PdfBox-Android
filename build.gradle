@@ -3,12 +3,11 @@ defaultTasks 'clean','build','connectedCheck'
 
 buildscript {
     repositories {
-        jcenter()
+        mavenCentral()
         google()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.3.1'
-        classpath 'com.jfrog.bintray.gradle:gradle-bintray-plugin:1.8.4'
+        classpath 'com.android.tools.build:gradle:7.1.2'
     }
 }
 
@@ -16,7 +15,9 @@ allprojects {
     version = VERSION_NAME
 
     repositories {
-        jcenter()
+//        Enable downloading snapshot versions
+//        maven { url "https://s01.oss.sonatype.org/content/repositories/snapshots/" }
+        mavenCentral()
         google()
     }
 

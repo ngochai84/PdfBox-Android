@@ -17,12 +17,16 @@
 package com.tom_roush.pdfbox.pdmodel;
 
 import java.io.IOException;
+import java.lang.ref.SoftReference;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
 
 import com.tom_roush.pdfbox.cos.COSBase;
 import com.tom_roush.pdfbox.cos.COSDictionary;
 import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.cos.COSObject;
+import com.tom_roush.pdfbox.cos.COSStream;
 import com.tom_roush.pdfbox.pdmodel.common.COSObjectable;
 import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList;
 import com.tom_roush.pdfbox.pdmodel.font.PDFont;
@@ -46,6 +50,11 @@ public final class PDResources implements COSObjectable
 {
     private final COSDictionary resources;
     private final ResourceCache cache;
+
+    // PDFBOX-3442 cache fonts that are not indirect objects, as these aren't cached in ResourceCache
+    // and this would result in huge memory footprint in text extraction
+    private final Map <COSName,SoftReference<PDFont>> directFontCache =
+        new HashMap<COSName, SoftReference<PDFont>>();
 
     /**
      * Constructor for embedding.
@@ -90,6 +99,7 @@ public final class PDResources implements COSObjectable
     /**
      * Returns the underlying dictionary.
      */
+    @Override
     public COSDictionary getCOSObject()
     {
         return resources;
@@ -99,7 +109,10 @@ public final class PDResources implements COSObjectable
      * Returns the font resource with the given name, or null if none exists.
      *
      * @param name Name of the font resource.
-     * @throws java.io.IOException if something went wrong.
+     *
+     * @return the font resource with the given name.
+     *
+     * @throws IOException if something went wrong.
      */
     public PDFont getFont(COSName name) throws IOException
     {
@@ -112,17 +125,33 @@ public final class PDResources implements COSObjectable
                 return cached;
             }
         }
-
-        PDFont font = null;
-        COSDictionary dict = (COSDictionary) get(COSName.FONT, name);
-        if (dict != null)
+        else if (indirect == null)
         {
-            font = PDFontFactory.createFont(dict);
+            SoftReference<PDFont> ref = directFontCache.get(name);
+            if (ref != null)
+            {
+                PDFont cached = ref.get();
+                if (cached != null)
+                {
+                    return cached;
+                }
+            }
         }
 
-        if (cache != null)
+        PDFont font = null;
+        COSDictionary dict = (COSDictionary)get(COSName.FONT, name);
+        if (dict != null)
+        {
+            font = PDFontFactory.createFont(dict, cache);
+        }
+
+        if (cache != null && indirect != null)
         {
             cache.put(indirect, font);
+        }
+        else if (indirect == null)
+        {
+            directFontCache.put(name, new SoftReference<PDFont>(font));
         }
         return font;
     }
@@ -131,11 +160,27 @@ public final class PDResources implements COSObjectable
      * Returns the color space resource with the given name, or null if none exists.
      *
      * @param name Name of the color space resource.
-     * @throws java.io.IOException if something went wrong.
+     * @return a new color space.
+     * @throws IOException if something went wrong.
      */
     public PDColorSpace getColorSpace(COSName name) throws IOException
     {
-        COSObject indirect = getIndirect(COSName.FONT, name);
+        return getColorSpace(name, false);
+    }
+
+    /**
+     * Returns the color space resource with the given name, or null if none exists. This method is
+     * for PDFBox internal use only, others should use {@link #getColorSpace(COSName)}.
+     *
+     * @param name Name of the color space resource.
+     * @param wasDefault if current color space was used by a default color space. This parameter is
+     * to
+     * @return a new color space.
+     * @throws IOException if something went wrong.
+     */
+    public PDColorSpace getColorSpace(COSName name, boolean wasDefault) throws IOException
+    {
+        COSObject indirect = getIndirect(COSName.COLORSPACE, name);
         if (cache != null && indirect != null)
         {
             PDColorSpace cached = cache.getColorSpace(indirect);
@@ -150,14 +195,15 @@ public final class PDResources implements COSObjectable
         COSBase object = get(COSName.COLORSPACE, name);
         if (object != null)
         {
-            colorSpace = PDColorSpace.create(object, this);
+            colorSpace = PDColorSpace.create(object, this, wasDefault);
         }
         else
         {
-            colorSpace = PDColorSpace.create(name, this);
+            colorSpace = PDColorSpace.create(name, this, wasDefault);
         }
 
-        if (cache != null)
+        // we can't cache PDPattern, because it holds page resources, see PDFBOX-2370
+        if (cache != null /*&& !(colorSpace instanceof PDPattern)*/) // TODO: PdfBox-Android
         {
             cache.put(indirect, colorSpace);
         }
@@ -168,6 +214,8 @@ public final class PDResources implements COSObjectable
      * Returns true if the given color space name exists in these resources.
      *
      * @param name Name of the color space resource.
+     *
+     * @return true if the color space with the given name exists.
      */
     public boolean hasColorSpace(COSName name)
     {
@@ -175,14 +223,15 @@ public final class PDResources implements COSObjectable
     }
 
     /**
-     * Returns the external graphics state resource with the given name, or null
-     * if none exists.
+     * Returns the extended graphics state resource with the given name, or null if none exists.
      *
      * @param name Name of the graphics state resource.
+     *
+     * @return the extended graphics state resource with the given name.
      */
     public PDExtendedGraphicsState getExtGState(COSName name)
     {
-        COSObject indirect = getIndirect(COSName.FONT, name);
+        COSObject indirect = getIndirect(COSName.EXT_G_STATE, name);
         if (cache != null && indirect != null)
         {
             PDExtendedGraphicsState cached = cache.getExtGState(indirect);
@@ -194,7 +243,7 @@ public final class PDResources implements COSObjectable
 
         // get the instance
         PDExtendedGraphicsState extGState = null;
-        COSDictionary dict = (COSDictionary) get(COSName.EXT_G_STATE, name);
+        COSDictionary dict = (COSDictionary)get(COSName.EXT_G_STATE, name);
         if (dict != null)
         {
             extGState = new PDExtendedGraphicsState(dict);
@@ -211,11 +260,14 @@ public final class PDResources implements COSObjectable
      * Returns the shading resource with the given name, or null if none exists.
      *
      * @param name Name of the shading resource.
-     * @throws java.io.IOException if something went wrong.
+     *
+     * @return the shading resource of the given name.
+     *
+     * @throws IOException if something went wrong.
      */
     public PDShading getShading(COSName name) throws IOException
     {
-        COSObject indirect = getIndirect(COSName.FONT, name);
+        COSObject indirect = getIndirect(COSName.SHADING, name);
         if (cache != null && indirect != null)
         {
             PDShading cached = cache.getShading(indirect);
@@ -227,7 +279,7 @@ public final class PDResources implements COSObjectable
 
         // get the instance
         PDShading shading = null;
-        COSDictionary dict = (COSDictionary) get(COSName.SHADING, name);
+        COSDictionary dict = (COSDictionary)get(COSName.SHADING, name);
         if (dict != null)
         {
             shading = PDShading.create(dict);
@@ -244,11 +296,14 @@ public final class PDResources implements COSObjectable
      * Returns the pattern resource with the given name, or null if none exists.
      *
      * @param name Name of the pattern resource.
-     * @throws java.io.IOException if something went wrong.
+     *
+     * @return the pattern resource of the given name.
+     *
+     * @throws IOException if something went wrong.
      */
     public PDAbstractPattern getPattern(COSName name) throws IOException
     {
-        COSObject indirect = getIndirect(COSName.FONT, name);
+        COSObject indirect = getIndirect(COSName.PATTERN, name);
         if (cache != null && indirect != null)
         {
             PDAbstractPattern cached = cache.getPattern(indirect);
@@ -260,7 +315,7 @@ public final class PDResources implements COSObjectable
 
         // get the instance
         PDAbstractPattern pattern = null;
-        COSDictionary dict = (COSDictionary) get(COSName.PATTERN, name);
+        COSDictionary dict = (COSDictionary)get(COSName.PATTERN, name);
         if (dict != null)
         {
             pattern = PDAbstractPattern.create(dict);
@@ -277,10 +332,12 @@ public final class PDResources implements COSObjectable
      * Returns the property list resource with the given name, or null if none exists.
      *
      * @param name Name of the property list resource.
+     *
+     * @return the property list resource of the given name.
      */
     public PDPropertyList getProperties(COSName name)
     {
-        COSObject indirect = getIndirect(COSName.FONT, name);
+        COSObject indirect = getIndirect(COSName.PROPERTIES, name);
         if (cache != null && indirect != null)
         {
             PDPropertyList cached = cache.getProperties(indirect);
@@ -292,7 +349,7 @@ public final class PDResources implements COSObjectable
 
         // get the instance
         PDPropertyList propertyList = null;
-        COSDictionary dict = (COSDictionary) get(COSName.PROPERTIES, name);
+        COSDictionary dict = (COSDictionary)get(COSName.PROPERTIES, name);
         if (dict != null)
         {
             propertyList = PDPropertyList.create(dict);
@@ -306,14 +363,43 @@ public final class PDResources implements COSObjectable
     }
 
     /**
+     * Tells whether the XObject resource with the given name is an image.
+     *
+     * @param name Name of the XObject resource.
+     * @return true if it is an image XObject, false if not.
+     */
+    public boolean isImageXObject(COSName name)
+    {
+        // get the instance
+        COSBase value = get(COSName.XOBJECT, name);
+        if (value == null)
+        {
+            return false;
+        }
+        else if (value instanceof COSObject)
+        {
+            value = ((COSObject) value).getObject();
+        }
+        if (!(value instanceof COSStream))
+        {
+            return false;
+        }
+        COSStream stream = (COSStream) value;
+        return COSName.IMAGE.equals(stream.getCOSName(COSName.SUBTYPE));
+    }
+
+    /**
      * Returns the XObject resource with the given name, or null if none exists.
      *
      * @param name Name of the XObject resource.
-     * @throws java.io.IOException if something went wrong.
+     *
+     * @return the XObject resource of the given name.
+     *
+     * @throws IOException if something went wrong.
      */
     public PDXObject getXObject(COSName name) throws IOException
     {
-        COSObject indirect = getIndirect(COSName.FONT, name);
+        COSObject indirect = getIndirect(COSName.XOBJECT, name);
         if (cache != null && indirect != null)
         {
             PDXObject cached = cache.getXObject(indirect);
@@ -338,12 +424,41 @@ public final class PDResources implements COSObjectable
         {
             xobject = PDXObject.createXObject(value, this);
         }
-
-        if (cache != null)
+        if (cache != null && isAllowedCache(xobject))
         {
             cache.put(indirect, xobject);
         }
         return xobject;
+    }
+
+    private boolean isAllowedCache(PDXObject xobject)
+    {
+        if (xobject instanceof PDImageXObject)
+        {
+            COSBase colorSpace = xobject.getCOSObject().getDictionaryObject(COSName.COLORSPACE);
+            if (colorSpace instanceof COSName)
+            {
+                // don't cache if it might use page resources, see PDFBOX-2370 and PDFBOX-3484
+                COSName colorSpaceName = (COSName) colorSpace;
+                if (colorSpaceName.equals(COSName.DEVICECMYK) && hasColorSpace(COSName.DEFAULT_CMYK))
+                {
+                    return false;
+                }
+                if (colorSpaceName.equals(COSName.DEVICERGB) && hasColorSpace(COSName.DEFAULT_RGB))
+                {
+                    return false;
+                }
+                if (colorSpaceName.equals(COSName.DEVICEGRAY) && hasColorSpace(COSName.DEFAULT_GRAY))
+                {
+                    return false;
+                }
+                if (hasColorSpace(colorSpaceName))
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /**
@@ -351,7 +466,7 @@ public final class PDResources implements COSObjectable
      */
     private COSObject getIndirect(COSName kind, COSName name)
     {
-        COSDictionary dict = (COSDictionary) resources.getDictionaryObject(kind);
+        COSDictionary dict = (COSDictionary)resources.getDictionaryObject(kind);
         if (dict == null)
         {
             return null;
@@ -359,8 +474,9 @@ public final class PDResources implements COSObjectable
         COSBase base = dict.getItem(name);
         if (base instanceof COSObject)
         {
-            return (COSObject) base;
+            return (COSObject)base;
         }
+        // not an indirect object. Resource may have been added at runtime.
         return null;
     }
 
@@ -379,6 +495,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the names of the color space resources, if any.
+     *
+     * @return the names of all color space resources.
      */
     public Iterable<COSName> getColorSpaceNames()
     {
@@ -387,6 +505,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the names of the XObject resources, if any.
+     *
+     * @return the names of all XObject resources.
      */
     public Iterable<COSName> getXObjectNames()
     {
@@ -395,6 +515,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the names of the font resources, if any.
+     *
+     * @return the names of all font resources.
      */
     public Iterable<COSName> getFontNames()
     {
@@ -403,6 +525,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the names of the property list resources, if any.
+     *
+     * @return the names of all property list resources.
      */
     public Iterable<COSName> getPropertiesNames()
     {
@@ -411,6 +535,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the names of the shading resources, if any.
+     *
+     * @return the names of all shading resources.
      */
     public Iterable<COSName> getShadingNames()
     {
@@ -419,6 +545,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the names of the pattern resources, if any.
+     *
+     * @return the names of all pattern resources.
      */
     public Iterable<COSName> getPatternNames()
     {
@@ -427,6 +555,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the names of the extended graphics state resources, if any.
+     *
+     * @return the names of all extended graphics state resources.
      */
     public Iterable<COSName> getExtGStateNames()
     {
@@ -435,6 +565,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the resource names of the given kind.
+     *
+     * @return the names of all resources of the given kind.
      */
     private Iterable<COSName> getNames(COSName kind)
     {
@@ -574,6 +706,20 @@ public final class PDResources implements COSObjectable
             return dict.getKeyForValue(object.getCOSObject());
         }
 
+        // PDFBOX-4509: It could exist as an indirect object, happens when a font is taken from the 
+        // AcroForm default resources of a loaded PDF.
+        if (dict != null && COSName.FONT.equals(kind))
+        {
+            for (Map.Entry<COSName, COSBase> entry : dict.entrySet())
+            {
+                if (entry.getValue() instanceof COSObject &&
+                    object.getCOSObject() == ((COSObject) entry.getValue()).getObject())
+                {
+                    return entry.getKey();
+                }
+            }
+        }
+
         // add the item with a new key
         COSName name = createKey(kind, prefix);
         put(kind, name, object);
@@ -634,7 +780,7 @@ public final class PDResources implements COSObjectable
      * @param name the name of the resource
      * @param colorSpace the color space to be added
      */
-    public void put(COSName name, PDColorSpace colorSpace) throws IOException
+    public void put(COSName name, PDColorSpace colorSpace)
     {
         put(COSName.COLORSPACE, name, colorSpace);
     }
@@ -696,6 +842,8 @@ public final class PDResources implements COSObjectable
 
     /**
      * Returns the resource cache associated with the Resources, or null if there is none.
+     *
+     * @return the resource cache associated with the resources.
      */
     public ResourceCache getResourceCache()
     {

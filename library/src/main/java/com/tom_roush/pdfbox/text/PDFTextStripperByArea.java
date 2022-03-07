@@ -22,11 +22,8 @@ import java.io.IOException;
 import java.io.StringWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Vector;
-
 import com.tom_roush.pdfbox.pdmodel.PDPage;
 
 /**
@@ -38,8 +35,8 @@ public class PDFTextStripperByArea extends PDFTextStripper
 {
     private final List<String> regions = new ArrayList<String>();
     private final Map<String, RectF> regionArea = new HashMap<String, RectF>();
-    private final Map<String, Vector<List<TextPosition>>> regionCharacterList =
-        new HashMap<String, Vector<List<TextPosition>>>();
+    private final Map<String, ArrayList<List<TextPosition>>> regionCharacterList
+        = new HashMap<String, ArrayList<List<TextPosition>>>();
     private final Map<String, StringWriter> regionText = new HashMap<String, StringWriter>();
 
     /**
@@ -48,16 +45,17 @@ public class PDFTextStripperByArea extends PDFTextStripper
      */
     public PDFTextStripperByArea() throws IOException
     {
-        super();
         super.setShouldSeparateByBeads(false);
     }
 
     /**
      * This method does nothing in this derived class, because beads and regions are incompatible. Beads are
      * ignored when stripping by area.
+     *
+     * @param aShouldSeparateByBeads The new grouping of beads.
      */
     @Override
-    public void setShouldSeparateByBeads(boolean aShouldSeparateByBeads)
+    public final void setShouldSeparateByBeads(boolean aShouldSeparateByBeads)
     {
     }
 
@@ -65,12 +63,24 @@ public class PDFTextStripperByArea extends PDFTextStripper
      * Add a new region to group text by.
      *
      * @param regionName The name of the region.
-     * @param rect The rectangle area to retrieve the text from.
+     * @param rect The rectangle area to retrieve the text from. The y-coordinates are java
+     * coordinates (y == 0 is top), not PDF coordinates (y == 0 is bottom).
      */
     public void addRegion( String regionName, RectF rect )
     {
         regions.add( regionName );
         regionArea.put( regionName, rect );
+    }
+
+    /**
+     * Delete a region to group text by. If the region does not exist, this method does nothing.
+     *
+     * @param regionName The name of the region to delete.
+     */
+    public void removeRegion(String regionName)
+    {
+        regions.remove(regionName);
+        regionArea.remove(regionName);
     }
 
     /**
@@ -103,46 +113,44 @@ public class PDFTextStripperByArea extends PDFTextStripper
      */
     public void extractRegions( PDPage page ) throws IOException
     {
-        Iterator<String> regionIter = regions.iterator();
-        while( regionIter.hasNext() )
+        for (String region : regions)
         {
             setStartPage(getCurrentPageNo());
             setEndPage(getCurrentPageNo());
             //reset the stored text for the region so this class
             //can be reused.
-            String regionName = regionIter.next();
-            Vector<List<TextPosition>> regionCharactersByArticle = new Vector<List<TextPosition>>();
+            String regionName = region;
+            ArrayList<List<TextPosition>> regionCharactersByArticle = new ArrayList<List<TextPosition>>();
             regionCharactersByArticle.add( new ArrayList<TextPosition>() );
             regionCharacterList.put( regionName, regionCharactersByArticle );
             regionText.put( regionName, new StringWriter() );
         }
 
-        if (page.hasContents())
+        if( page.hasContents() )
         {
-        	processPage( page );
+            processPage( page );
         }
     }
+
 
     /**
      * {@inheritDoc}
      */
     @Override
-    protected void processTextPosition( TextPosition text )
+    protected void processTextPosition(TextPosition text)
     {
-        Iterator<String> regionIter = regionArea.keySet().iterator();
-        while( regionIter.hasNext() )
+        for (Map.Entry<String, RectF> regionAreaEntry : regionArea.entrySet())
         {
-            String region = regionIter.next();
-            RectF rect = regionArea.get( region );
-            if( rect.contains( text.getX(), text.getY() ) )
+            RectF rect = regionAreaEntry.getValue();
+            if (rect.contains(text.getX(), text.getY()))
             {
-                charactersByArticle = regionCharacterList.get( region );
-                super.processTextPosition( text );
+                charactersByArticle = regionCharacterList.get(regionAreaEntry.getKey());
+                super.processTextPosition(text);
             }
         }
     }
 
-    
+
     /**
      * This will print the processed page text to the output stream.
      *
@@ -151,10 +159,8 @@ public class PDFTextStripperByArea extends PDFTextStripper
     @Override
     protected void writePage() throws IOException
     {
-        Iterator<String> regionIter = regionArea.keySet().iterator();
-        while( regionIter.hasNext() )
+        for (String region : regionArea.keySet())
         {
-            String region = regionIter.next();
             charactersByArticle = regionCharacterList.get( region );
             output = regionText.get( region );
             super.writePage();

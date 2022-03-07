@@ -30,6 +30,7 @@ import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject;
 
 /**
  * This class represents an appearance characteristics dictionary.
+ *
  */
 public class PDAppearanceCharacteristicsDictionary implements COSObjectable
 {
@@ -38,7 +39,7 @@ public class PDAppearanceCharacteristicsDictionary implements COSObjectable
 
     /**
      * Constructor.
-     * 
+     *
      * @param dict dictionary
      */
     public PDAppearanceCharacteristicsDictionary(COSDictionary dict)
@@ -47,7 +48,8 @@ public class PDAppearanceCharacteristicsDictionary implements COSObjectable
     }
 
     /**
-     * Returns the dictionary.
+     * returns the dictionary.
+     *
      * @return the dictionary
      */
     @Override
@@ -57,8 +59,8 @@ public class PDAppearanceCharacteristicsDictionary implements COSObjectable
     }
 
     /**
-     * This will retrieve the rotation of the annotation widget.
-     * It must be a multiple of 90. Default is 0 
+     * This will retrieve the rotation of the annotation widget. It must be a multiple of 90. Default is 0
+     *
      * @return the rotation
      */
     public int getRotation()
@@ -68,7 +70,7 @@ public class PDAppearanceCharacteristicsDictionary implements COSObjectable
 
     /**
      * This will set the rotation.
-     * 
+     *
      * @param rotation the rotation as a multiple of 90
      */
     public void setRotation(int rotation)
@@ -78,171 +80,172 @@ public class PDAppearanceCharacteristicsDictionary implements COSObjectable
 
     /**
      * This will retrieve the border color.
-     * 
+     *
      * @return the border color.
      */
     public PDColor getBorderColour()
     {
-    	return getColor(COSName.BC);
+        return getColor(COSName.BC);
     }
 
     /**
      * This will set the border color.
-     * 
+     *
      * @param c the border color
      */
     public void setBorderColour(PDColor c)
     {
-    	this.getCOSObject().setItem(COSName.BC, c.toCOSArray());
+        this.getCOSObject().setItem(COSName.BC, c.toCOSArray());
     }
 
     /**
      * This will retrieve the background color.
-     * 
+     *
      * @return the background color.
      */
     public PDColor getBackground()
     {
-    	return getColor(COSName.BG);
+        return getColor(COSName.BG);
     }
 
     /**
      * This will set the background color.
-     * 
+     *
      * @param c the background color
      */
     public void setBackground(PDColor c)
     {
-    	this.getCOSObject().setItem(COSName.BG, c.toCOSArray());
+        this.getCOSObject().setItem(COSName.BG, c.toCOSArray());
     }
 
     /**
      * This will retrieve the normal caption.
-     * 
+     *
      * @return the normal caption.
      */
     public String getNormalCaption()
     {
-        return this.getCOSObject().getString("CA");
+        return this.getCOSObject().getString(COSName.CA);
     }
 
     /**
      * This will set the normal caption.
-     * 
+     *
      * @param caption the normal caption
      */
     public void setNormalCaption(String caption)
     {
-        this.getCOSObject().setString("CA", caption);
+        this.getCOSObject().setString(COSName.CA, caption);
     }
 
     /**
      * This will retrieve the rollover caption.
-     * 
+     *
      * @return the rollover caption.
      */
     public String getRolloverCaption()
     {
-        return this.getCOSObject().getString("RC");
+        return this.getCOSObject().getString(COSName.RC);
     }
 
     /**
      * This will set the rollover caption.
-     * 
+     *
      * @param caption the rollover caption
      */
     public void setRolloverCaption(String caption)
     {
-        this.getCOSObject().setString("RC", caption);
+        this.getCOSObject().setString(COSName.RC, caption);
     }
 
     /**
      * This will retrieve the alternate caption.
-     * 
+     *
      * @return the alternate caption.
      */
     public String getAlternateCaption()
     {
-        return this.getCOSObject().getString("AC");
+        return this.getCOSObject().getString(COSName.AC);
     }
 
     /**
      * This will set the alternate caption.
-     * 
+     *
      * @param caption the alternate caption
      */
     public void setAlternateCaption(String caption)
     {
-        this.getCOSObject().setString("AC", caption);
+        this.getCOSObject().setString(COSName.AC, caption);
     }
 
     /**
      * This will retrieve the normal icon.
-     * 
+     *
      * @return the normal icon.
      */
     public PDFormXObject getNormalIcon()
     {
-        COSBase i = this.getCOSObject().getDictionaryObject("I");
+        COSBase i = this.getCOSObject().getDictionaryObject(COSName.I);
         if (i instanceof COSStream)
         {
-            return new PDFormXObject((COSStream) i);
+            return new PDFormXObject((COSStream)i);
         }
         return null;
     }
 
     /**
      * This will retrieve the rollover icon.
-     * 
+     *
      * @return the rollover icon
      */
     public PDFormXObject getRolloverIcon()
     {
-        COSBase i = this.getCOSObject().getDictionaryObject("RI");
+        COSBase i = this.getCOSObject().getDictionaryObject(COSName.RI);
         if (i instanceof COSStream)
         {
-            return new PDFormXObject((COSStream) i);
+            return new PDFormXObject((COSStream)i);
         }
         return null;
     }
 
     /**
      * This will retrieve the alternate icon.
-     * 
+     *
      * @return the alternate icon.
      */
     public PDFormXObject getAlternateIcon()
     {
-        COSBase i = this.getCOSObject().getDictionaryObject("IX");
+        COSBase i = this.getCOSObject().getDictionaryObject(COSName.IX);
         if (i instanceof COSStream)
         {
-            return new PDFormXObject((COSStream) i);
+            return new PDFormXObject((COSStream)i);
         }
         return null;
     }
 
     private PDColor getColor(COSName itemName)
     {
-    	COSBase c = this.getCOSObject().getItem(itemName);
-    	if (c instanceof COSArray)
-    	{
-    		PDColorSpace colorSpace = null;
-    		switch (((COSArray) c).size())
-    		{
-    		case 1:
-    			colorSpace = PDDeviceGray.INSTANCE;
-    			break;
-    		case 3:
-    			colorSpace = PDDeviceRGB.INSTANCE;
-    			break;
-//    		case 4:
-//    			colorSpace = PDDeviceCMYK.INSTANCE;
-//    			break; TODO: PdfBox-Android
-    		default:
-    			break;
-    		}
-    		return new PDColor((COSArray) c, colorSpace);
-    	}
-    	return null;
+        COSBase c = this.getCOSObject().getItem(itemName);
+        if (c instanceof COSArray)
+        {
+            PDColorSpace colorSpace;
+            switch (((COSArray) c).size())
+            {
+                case 1:
+                    colorSpace = PDDeviceGray.INSTANCE;
+                    break;
+                case 3:
+                    colorSpace = PDDeviceRGB.INSTANCE;
+                    break;
+//                case 4:
+//                    colorSpace = PDDeviceCMYK.INSTANCE; TODO: PdfBox-Android
+//                    break;
+                default:
+                    return null;
+            }
+            return new PDColor((COSArray) c, colorSpace);
+        }
+        return null;
     }
+
 }

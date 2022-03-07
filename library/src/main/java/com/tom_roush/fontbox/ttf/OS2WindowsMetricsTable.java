@@ -20,8 +20,9 @@ import java.io.IOException;
 
 /**
  * A table in a true type font.
- * 
+ *
  * @author Ben Litchfield
+ *
  */
 public class OS2WindowsMetricsTable extends TTFTable
 {
@@ -154,16 +155,16 @@ public class OS2WindowsMetricsTable extends TTFTable
     public static final short FSTYPE_RESTRICTED = 0x0001;
 
     /**
-     * Preview & Print embedding: the font may be embedded, and temporarily loaded on the
+     * Preview and Print embedding: the font may be embedded, and temporarily loaded on the
      * remote system. No edits can be applied to the document.
      */
     public static final short FSTYPE_PREVIEW_AND_PRINT = 0x0004;
 
     /**
      * Editable embedding: the font may be embedded but must only be installed temporarily on other
-     * systems. Documents may be editied and changes saved.
+     * systems. Documents may be edited and changes saved.
      */
-    public static final short FSTYPE_EDITIBLE = 0x0004;
+    public static final short FSTYPE_EDITIBLE = 0x0008;
 
     /**
      * No subsetting: the font must not be subsetted prior to embedding.
@@ -510,11 +511,11 @@ public class OS2WindowsMetricsTable extends TTFTable
     }
 
     /**
-     * @param typoLineGapValue The typoLineGap to set.
+     * @param typeLineGapValue The typoLineGap to set.
      */
-    public void setTypeLineGap(int typoLineGapValue)
+    public void setTypoLineGap(int typeLineGapValue)
     {
-        this.typoLineGap = typoLineGapValue;
+        this.typoLineGap = typeLineGapValue;
     }
 
     /**
@@ -698,7 +699,7 @@ public class OS2WindowsMetricsTable extends TTFTable
      */
     public int getHeight()
     {
-    	return sxHeight;
+        return sxHeight;
     }
 
     /**
@@ -706,7 +707,7 @@ public class OS2WindowsMetricsTable extends TTFTable
      */
     public int getCapHeight()
     {
-    	return sCapHeight;
+        return sCapHeight;
     }
 
     /**
@@ -714,7 +715,7 @@ public class OS2WindowsMetricsTable extends TTFTable
      */
     public int getDefaultChar()
     {
-    	return usDefaultChar;
+        return usDefaultChar;
     }
 
     /**
@@ -722,7 +723,7 @@ public class OS2WindowsMetricsTable extends TTFTable
      */
     public int getBreakChar()
     {
-    	return usBreakChar;
+        return usBreakChar;
     }
 
     /**
@@ -730,7 +731,7 @@ public class OS2WindowsMetricsTable extends TTFTable
      */
     public int getMaxContext()
     {
-    	return usMaxContext;
+        return usMaxContext;
     }
 
     private int version;
@@ -778,12 +779,12 @@ public class OS2WindowsMetricsTable extends TTFTable
 
     /**
      * This will read the required data from the stream.
-     * 
+     *
      * @param ttf The font that is being read.
      * @param data The stream to read the data from.
      * @throws IOException If there is an error reading the data.
      */
-    public void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
+    void read(TrueTypeFont ttf, TTFDataStream data) throws IOException
     {
         version = data.readUnsignedShort();
         averageCharWidth = data.readSignedShort();
@@ -817,16 +818,16 @@ public class OS2WindowsMetricsTable extends TTFTable
         winDescent = data.readUnsignedShort();
         if (version >= 1)
         {
-        	codePageRange1 = data.readUnsignedInt();
-        	codePageRange2 = data.readUnsignedInt();
+            codePageRange1 = data.readUnsignedInt();
+            codePageRange2 = data.readUnsignedInt();
         }
         if (version >= 1.2)
         {
-        	sxHeight = data.readSignedShort();
-        	sCapHeight = data.readSignedShort();
-        	usDefaultChar = data.readUnsignedShort();
-        	usBreakChar = data.readUnsignedShort();
-        	usMaxContext = data.readUnsignedShort();
+            sxHeight = data.readSignedShort();
+            sCapHeight = data.readSignedShort();
+            usDefaultChar = data.readUnsignedShort();
+            usBreakChar = data.readUnsignedShort();
+            usMaxContext = data.readUnsignedShort();
         }
         initialized = true;
     }

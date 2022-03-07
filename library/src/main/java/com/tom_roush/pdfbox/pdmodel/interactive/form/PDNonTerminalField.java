@@ -16,8 +16,11 @@
  */
 package com.tom_roush.pdfbox.pdmodel.interactive.form;
 
+import android.util.Log;
+
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.tom_roush.pdfbox.cos.COSArray;
@@ -28,12 +31,13 @@ import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.pdmodel.common.COSArrayList;
 import com.tom_roush.pdfbox.pdmodel.common.COSObjectable;
 import com.tom_roush.pdfbox.pdmodel.fdf.FDFField;
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 
 /**
  * A non terminal field in an interactive form.
  *
  * A non terminal field is a node in the fields tree node whose descendants
- * are fields.
+ * are fields. 
  *
  * The attributes such as FT (field type) or V (field value) do not logically
  * belong to the non terminal field but are inheritable attributes
@@ -58,7 +62,7 @@ public class PDNonTerminalField extends PDField
      * @param field the PDF object to represent as a field.
      * @param parent the parent node of the node to be created
      */
-    public PDNonTerminalField(PDAcroForm acroForm, COSDictionary field, PDNonTerminalField parent)
+    PDNonTerminalField(PDAcroForm acroForm, COSDictionary field, PDNonTerminalField parent)
     {
         super(acroForm, field, parent);
     }
@@ -67,7 +71,7 @@ public class PDNonTerminalField extends PDField
     public int getFieldFlags()
     {
         int retval = 0;
-        COSInteger ff = (COSInteger) dictionary.getDictionaryObject(COSName.FF);
+        COSInteger ff = (COSInteger) getCOSObject().getDictionaryObject(COSName.FF);
         if (ff != null)
         {
             retval = ff.intValue();
@@ -122,19 +126,29 @@ public class PDNonTerminalField extends PDField
     /**
      * Returns this field's children. These may be either terminal or non-terminal fields.
      *
-     * @return he list of child fields.
+     * @return the list of child fields. Be aware that this list is <i>not</i> backed by the
+     * children of the field, so adding or deleting has no effect on the PDF document until you call
+     * {@link #setChildren(java.util.List) setChildren()} with the modified list.
      */
     public List<PDField> getChildren()
     {
         List<PDField> children = new ArrayList<PDField>();
-        COSArray kids = (COSArray) dictionary.getDictionaryObject(COSName.KIDS);
+        COSArray kids = (COSArray)getCOSObject().getDictionaryObject(COSName.KIDS);
         for (int i = 0; i < kids.size(); i++)
         {
-            PDField field = PDField
-                .fromDictionary(acroForm, (COSDictionary) kids.getObject(i), this);
-            if (field != null)
+            COSBase kid = kids.getObject(i);
+            if (kid instanceof COSDictionary)
             {
-                children.add(field);
+                if (kid.getCOSObject() == this.getCOSObject())
+                {
+                    Log.w("PdfBox-Android", "Child field is same object as parent");
+                    continue;
+                }
+                PDField field = PDField.fromDictionary(getAcroForm(), (COSDictionary) kid, this);
+                if (field != null)
+                {
+                    children.add(field);
+                }
             }
         }
         return children;
@@ -148,18 +162,7 @@ public class PDNonTerminalField extends PDField
     public void setChildren(List<PDField> children)
     {
         COSArray kidsArray = COSArrayList.converterToCOSArray(children);
-        dictionary.setItem(COSName.KIDS, kidsArray);
-    }
-
-    /**
-     * {@inheritDoc}
-     * <p><b>Note:</b> while non-terminal fields <b>do</b> inherit field values, this method returns
-     * the local value, without inheritance.
-     */
-    @Override
-    public String getFieldType()
-    {
-        return dictionary.getNameAsString(COSName.FT);
+        getCOSObject().setItem(COSName.KIDS, kidsArray);
     }
 
     /**
@@ -168,9 +171,21 @@ public class PDNonTerminalField extends PDField
      * <p><b>Note:</b> while non-terminal fields <b>do</b> inherit field values, this method returns
      * the local value, without inheritance.
      */
+    @Override
+    public String getFieldType()
+    {
+        return getCOSObject().getNameAsString(COSName.FT);
+    }
+
+    /**
+     * Get the field value.
+     *
+     * <p><b>Note:</b> while non-terminal fields <b>do</b> inherit field values, this method returns
+     * the local value, without inheritance.
+     */
     public COSBase getValue()
     {
-        return dictionary.getDictionaryObject(COSName.V);
+        return getCOSObject().getDictionaryObject(COSName.V);
     }
 
     /**
@@ -182,7 +197,7 @@ public class PDNonTerminalField extends PDField
     @Override
     public String getValueAsString()
     {
-        COSBase fieldValue = dictionary.getDictionaryObject(COSName.V);
+        COSBase fieldValue = getCOSObject().getDictionaryObject(COSName.V);
         return fieldValue != null ? fieldValue.toString() : "";
     }
 
@@ -192,10 +207,26 @@ public class PDNonTerminalField extends PDField
      *
      * <p><b>Note:</b> while non-terminal fields <b>do</b> inherit field values, this method returns
      * the local value, without inheritance.
+     * @param object
+     * @throws java.io.IOException
      */
     public void setValue(COSBase object) throws IOException
     {
-        dictionary.setItem(COSName.V, object);
+        getCOSObject().setItem(COSName.V, object);
+        // todo: propagate change event to children?
+        // todo: construct appearances of children?
+    }
+
+    /**
+     * Sets the plain text value of this field.
+     *
+     * @param value Plain text
+     * @throws IOException if the value could not be set
+     */
+    @Override
+    public void setValue(String value) throws IOException
+    {
+        getCOSObject().setString(COSName.V, value);
         // todo: propagate change event to children?
         // todo: construct appearances of children?
     }
@@ -209,7 +240,7 @@ public class PDNonTerminalField extends PDField
      */
     public COSBase getDefaultValue()
     {
-        return dictionary.getDictionaryObject(COSName.DV);
+        return getCOSObject().getDictionaryObject(COSName.DV);
     }
 
     /**
@@ -218,9 +249,17 @@ public class PDNonTerminalField extends PDField
      *
      * <p><b>Note:</b> while non-terminal fields <b>do</b> inherit field values, this method returns
      * the local value, without inheritance.
+     * @param value
      */
     public void setDefaultValue(COSBase value)
     {
-        dictionary.setItem(COSName.V, value);
+        getCOSObject().setItem(COSName.V, value);
+    }
+
+    @Override
+    public List<PDAnnotationWidget> getWidgets()
+    {
+        List<PDAnnotationWidget> emptyList = Collections.emptyList();
+        return Collections.unmodifiableList(emptyList);
     }
 }

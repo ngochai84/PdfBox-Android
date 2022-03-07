@@ -17,6 +17,7 @@
 
 package com.tom_roush.pdfbox.pdfparser;
 
+import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PushbackInputStream;
@@ -52,16 +53,30 @@ final class InputStreamSource implements SequentialSource
     public int read(byte[] b) throws IOException
     {
         int n = input.read(b);
-        position += n;
-        return n;
+        if (n > 0)
+        {
+            position += n;
+            return n;
+        }
+        else
+        {
+            return -1;
+        }
     }
 
     @Override
     public int read(byte[] b, int offset, int length) throws IOException
     {
         int n = input.read(b, offset, length);
-        position += n;
-        return n;
+        if (n > 0)
+        {
+            position += n;
+            return n;
+        }
+        else
+        {
+            return -1;
+        }
     }
 
     @Override
@@ -96,18 +111,26 @@ final class InputStreamSource implements SequentialSource
     }
 
     @Override
+    public void unread(byte[] bytes, int start, int len) throws IOException
+    {
+        input.unread(bytes, start, len);
+        position -= len;
+    }
+
+    @Override
     public byte[] readFully(int length) throws IOException
     {
         byte[] bytes = new byte[length];
-        int off = 0;
-        int len = length;
-        while (len > 0)
+        int bytesRead = 0;
+        do
         {
-            int n = this.read(bytes, off, len);
-            off += n;
-            len -= n;
-            position += n;
-        }
+            int count = read(bytes, bytesRead, length - bytesRead);
+            if (count < 0)
+            {
+                throw new EOFException();
+            }
+            bytesRead += count;
+        } while (bytesRead < length);
         return bytes;
     }
 

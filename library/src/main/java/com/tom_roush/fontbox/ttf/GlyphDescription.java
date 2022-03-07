@@ -20,28 +20,32 @@ package com.tom_roush.fontbox.ttf;
 
 /**
  * Specifies access to glyph description classes, simple and composite.
- * 
+ *
  * This class is based on code from Apache Batik a subproject of Apache XMLGraphics.
  * see http://xmlgraphics.apache.org/batik/ for further details.
- * 
+ *
  */
-public interface GlyphDescription 
+public interface GlyphDescription
 {
-    /** 
+    /**
      * Returns the index of the ending point of the given contour.
-     * 
+     *
      * @param i the number of the contour
      * @return the index of the ending point of the given contour
      */
     int getEndPtOfContours(int i);
-    
+
     /**
-     * Returns the flags of the given point.
+     * Returns the flags of the given point. To decode these bit flags, use the static elements of
+     * {@link GlyfDescript}. See also "Outline flags" in
+     * <a href="https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6glyf.html">The
+     * 'glyf' table</a> in the TrueType Reference Manual.
+     *
      * @param i the given point
      * @return the flags value for the given point
      */
     byte getFlags(int i);
-    
+
     /**
      * Returns the x coordinate of the given point.
      * @param i the given point
@@ -61,21 +65,21 @@ public interface GlyphDescription
      * @return true if this point is a composite
      */
     boolean isComposite();
-    
+
     /**
      * Returns the number of points.
      * @return the number of points
      */
     int getPointCount();
-    
+
     /**
      * Returns the number of contours.
      * @return the number of contours
      */
     int getContourCount();
-    
+
     /**
      * Resolve all parts of an composite glyph.
      */
-    void resolve(); 
+    void resolve();
 }

@@ -16,15 +16,20 @@
  */
 package com.tom_roush.pdfbox.pdmodel.interactive.form;
 
+import java.io.IOException;
+import java.util.List;
+
 import com.tom_roush.pdfbox.cos.COSArray;
 import com.tom_roush.pdfbox.cos.COSBase;
 import com.tom_roush.pdfbox.cos.COSDictionary;
 import com.tom_roush.pdfbox.cos.COSName;
+import com.tom_roush.pdfbox.cos.COSStream;
+import com.tom_roush.pdfbox.cos.COSString;
+import com.tom_roush.pdfbox.pdmodel.common.COSArrayList;
 import com.tom_roush.pdfbox.pdmodel.common.COSObjectable;
 import com.tom_roush.pdfbox.pdmodel.fdf.FDFField;
 import com.tom_roush.pdfbox.pdmodel.interactive.action.PDFormFieldAdditionalActions;
-
-import java.io.IOException;
+import com.tom_roush.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 
 /**
  * A field in an interactive form.
@@ -35,22 +40,9 @@ public abstract class PDField implements COSObjectable
     private static final int FLAG_REQUIRED = 1 << 1;
     private static final int FLAG_NO_EXPORT = 1 << 2;
 
-    /**
-     * Creates a COSField subclass from the given COS field. This is for reading fields from PDFs.
-     *
-     * @param form the form that the field is part of
-     * @param field the dictionary representing a field element
-     * @param parent the parent node of the node to be created, or null if root.
-     * @return a new PDField instance
-     */
-    static PDField fromDictionary(PDAcroForm form, COSDictionary field, PDNonTerminalField parent)
-    {
-        return PDFieldFactory.createField(form, field, parent);
-    }
-
-    protected final PDAcroForm acroForm;
-    protected final PDNonTerminalField parent;
-    protected final COSDictionary dictionary;
+    private final PDAcroForm acroForm;
+    private final PDNonTerminalField parent;
+    private final COSDictionary dictionary;
 
     /**
      * Constructor.
@@ -64,8 +56,7 @@ public abstract class PDField implements COSObjectable
 
     /**
      * Constructor.
-     *
-     * @param acroForm The form that this field is part of.
+     *  @param acroForm The form that this field is part of.
      * @param field the PDF object to represent as a field.
      * @param parent the parent node of the node
      */
@@ -74,6 +65,19 @@ public abstract class PDField implements COSObjectable
         this.acroForm = acroForm;
         this.dictionary = field;
         this.parent = parent;
+    }
+
+    /**
+     * Creates a COSField subclass from the given COS field. This is for reading fields from PDFs.
+     *
+     * @param form the form that the field is part of
+     * @param field the dictionary representing a field element
+     * @param parent the parent node of the node to be created, or null if root.
+     * @return a new PDField instance
+     */
+    static PDField fromDictionary(PDAcroForm form, COSDictionary field, PDNonTerminalField parent)
+    {
+        return PDFieldFactory.createField(form, field, parent);
     }
 
     /**
@@ -103,15 +107,39 @@ public abstract class PDField implements COSObjectable
      * is an inheritable attribute.
      *
      * @return The Field type.
+     *
      */
     public abstract String getFieldType();
 
     /**
      * Returns a string representation of the "V" entry, or an empty string.
      *
-     * @return A non-null string.
+     * @return The list of widget annotations.
      */
     public abstract String getValueAsString();
+
+    /**
+     * Sets the value of the field.
+     *
+     * @param value the new field value.
+     *
+     * @throws IOException if the value could not be set
+     */
+    public abstract void setValue(String value) throws IOException;
+
+
+    /**
+     * Returns the widget annotations associated with this field.
+     *
+     * For {@link PDNonTerminalField} the list will be empty as non terminal fields
+     * have no visual representation in the form.
+     *
+     * @return a List of {@link PDAnnotationWidget} annotations. Be aware that this list is
+     * <i>not</i> backed by the actual widget collection of the field, so adding or deleting has no
+     * effect on the PDF document. For {@link PDTerminalField} you'd have to call
+     * {@link PDTerminalField#setWidgets(java.util.List) setWidgets()} with the modified list.
+     */
+    public abstract List<PDAnnotationWidget> getWidgets();
 
     /**
      * sets the field to be read-only.
@@ -124,6 +152,7 @@ public abstract class PDField implements COSObjectable
     }
 
     /**
+     *
      * @return true if the field is readonly
      */
     public boolean isReadOnly()
@@ -132,7 +161,8 @@ public abstract class PDField implements COSObjectable
     }
 
     /**
-     * sets the field to be required.
+     * sets the flag whether the field is to be required to have a value at the time it is exported
+     * by a submit-form action.
      *
      * @param required The new flag for required.
      */
@@ -142,7 +172,8 @@ public abstract class PDField implements COSObjectable
     }
 
     /**
-     * @return true if the field is required
+     * @return true if the field is required to have a value at the time it is exported by a
+     * submit-form action.
      */
     public boolean isRequired()
     {
@@ -160,6 +191,7 @@ public abstract class PDField implements COSObjectable
     }
 
     /**
+     *
      * @return true if the field is not to be exported.
      */
     public boolean isNoExport()
@@ -209,10 +241,37 @@ public abstract class PDField implements COSObjectable
     void importFDF(FDFField fdfField) throws IOException
     {
         COSBase fieldValue = fdfField.getCOSValue();
-        if (fieldValue != null)
+
+        if (fieldValue != null && this instanceof PDTerminalField)
+        {
+            PDTerminalField currentField = (PDTerminalField) this;
+
+            if (fieldValue instanceof COSName)
+            {
+                currentField.setValue(((COSName) fieldValue).getName());
+            }
+            else if (fieldValue instanceof COSString)
+            {
+                currentField.setValue(((COSString) fieldValue).getString());
+            }
+            else if (fieldValue instanceof COSStream)
+            {
+                currentField.setValue(((COSStream) fieldValue).toTextString());
+            }
+            else if (fieldValue instanceof COSArray && this instanceof PDChoice)
+            {
+                ((PDChoice) this).setValue(COSArrayList.convertCOSStringCOSArrayToList((COSArray) fieldValue));
+            }
+            else
+            {
+                throw new IOException("Error:Unknown type for field import" + fieldValue);
+            }
+        }
+        else if (fieldValue != null)
         {
             dictionary.setItem(COSName.V, fieldValue);
         }
+
         Integer ff = fdfField.getFieldFlags();
         if (ff != null)
         {
@@ -286,7 +345,7 @@ public abstract class PDField implements COSObjectable
                 if (name[nameIndex].equals(kidDictionary.getString(COSName.T)))
                 {
                     retval = PDField.fromDictionary(acroForm, kidDictionary,
-                        (PDNonTerminalField) this);
+                        (PDNonTerminalField)this);
                     if (retval != null && name.length > nameIndex + 1)
                     {
                         retval = retval.findKid(name, nameIndex + 1);
@@ -327,7 +386,6 @@ public abstract class PDField implements COSObjectable
     {
         return dictionary.getString(COSName.T);
     }
-
     /**
      * This will set the partial name of the field.
      *
@@ -362,7 +420,9 @@ public abstract class PDField implements COSObjectable
     }
 
     /**
-     * Gets the alternate name of the field.
+     * Gets the alternate name of the field ("shall be used in place of the actual field name
+     * wherever the field shall be identified in the user interface (such as in error or status
+     * messages referring to the field)").
      *
      * @return the alternate name of the field
      */
@@ -372,9 +432,12 @@ public abstract class PDField implements COSObjectable
     }
 
     /**
-     * This will set the alternate name of the field.
+     * This will set the alternate name of the field ("shall be used in place of the actual field
+     * name wherever the field shall be identified in the user interface (such as in error or status
+     * messages referring to the field)"). The text appears as a tool tip in Adobe Reader. Because
+     * of the usage for error or status messages, it should be different for each field.
      *
-     * @param alternateFieldName the alternate name of the field
+     * @param alternateFieldName the alternate name of the field.
      */
     public void setAlternateFieldName(String alternateFieldName)
     {
