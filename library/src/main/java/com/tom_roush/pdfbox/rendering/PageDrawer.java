@@ -65,6 +65,7 @@ import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceGray;
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import com.tom_roush.pdfbox.pdmodel.graphics.form.PDTransparencyGroup;
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImage;
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import com.tom_roush.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentGroup;
 import com.tom_roush.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentGroup.RenderState;
 import com.tom_roush.pdfbox.pdmodel.graphics.optionalcontent.PDOptionalContentMembershipDictionary;
@@ -132,7 +133,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
 
     private final Deque<TransparencyGroup> transparencyGroupStack = new ArrayDeque<>();
 
-    // if greater zero the content is hidden and wil not be rendered
+    // if greater zero the content is hidden and will not be rendered
     private int nestedHiddenOCGCount;
 
     private final RenderDestination destination;
@@ -521,7 +522,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
 
 //    private void adjustRectangle(RectF r) TODO: PdfBox-Android
 
-//    private Bitmap adjustImage(Bitmap gray) throws IOException TODO: PdfBox-Android
+//    private Bitmap adjustImage(Bitmap gray) TODO: PdfBox-Android
 
 //    private Paint getStrokingPaint() throws IOException TODO: PdfBox-Android
 
@@ -757,6 +758,11 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     @Override
     public void drawImage(PDImage pdImage) throws IOException
     {
+        if (pdImage instanceof PDImageXObject &&
+            isHiddenOCG(((PDImageXObject) pdImage).getOptionalContent()))
+        {
+            return;
+        }
         Matrix ctm = getGraphicsState().getCurrentTransformationMatrix();
         AffineTransform at = ctm.createAffineTransform();
 
@@ -767,8 +773,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
 
             // if the image is scaled down, we use smooth interpolation, eg PDFBOX-2364
             // only when scaled up do we use nearest neighbour, eg PDFBOX-2302 / mori-cvpr01.pdf
-            // stencils are excluded from this rule (see survey.pdf)
-            if (isScaledUp || pdImage.isStencil())
+            if (isScaledUp)
             {
 //                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
 //                    RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
@@ -883,9 +888,9 @@ public class PageDrawer extends PDFGraphicsStreamEngine
 
         // prepare transfer functions (either one per color or one for all) 
         // and maps (actually arrays[256] to be faster) to avoid calculating values several times
-        Integer rMap[];
-        Integer gMap[];
-        Integer bMap[];
+        Integer[] rMap;
+        Integer[] gMap;
+        Integer[] bMap;
         PDFunction rf;
         PDFunction gf;
         PDFunction bf;
@@ -1046,6 +1051,10 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     @Override
     public void showForm(PDFormXObject form) throws IOException
     {
+        if (isHiddenOCG(form.getOptionalContent()))
+        {
+            return;
+        }
         if (isContentRendered())
         {
             super.showForm(form);
@@ -1067,6 +1076,10 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     @Override
     public void showTransparencyGroup(PDTransparencyGroup form) throws IOException
     {
+        if (isHiddenOCG(form.getOptionalContent()))
+        {
+            return;
+        }
         if (!isContentRendered())
         {
             return;

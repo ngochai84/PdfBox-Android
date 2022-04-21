@@ -80,6 +80,11 @@ public abstract class PDAnnotation implements COSObjectable
      * An annotation flag.
      */
     private static final int FLAG_TOGGLE_NO_VIEW = 1 << 8;
+    /**
+     * An annotation flag.
+     * @see #setLockedContents(boolean)
+     */
+    private static final int FLAG_LOCKED_CONTENTS = 1 << 9;
 
     private final COSDictionary dictionary;
 
@@ -183,6 +188,35 @@ public abstract class PDAnnotation implements COSObjectable
         dictionary = dict;
         dictionary.setItem(COSName.TYPE, COSName.ANNOT);
     }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public boolean equals (Object o) {
+        if (o == this)
+        {
+            return true;
+        }
+
+        if (!(o instanceof PDAnnotation))
+        {
+            return false;
+        }
+
+        COSDictionary toBeCompared = ((PDAnnotation) o).getCOSObject();
+        return toBeCompared.equals(getCOSObject());
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public int hashCode()
+    {
+        return dictionary.hashCode();
+    }
+
 
     /**
      * The annotation rectangle, defining the location of the annotation on the page in default user space units. This
@@ -507,6 +541,35 @@ public abstract class PDAnnotation implements COSObjectable
     }
 
     /**
+     * Get the LockedContents flag.
+     *
+     * @return The LockedContents flag.
+     * @see #setLockedContents(boolean)
+     */
+    public boolean isLockedContents()
+    {
+        return getCOSObject().getFlag(COSName.F, FLAG_LOCKED_CONTENTS);
+    }
+
+    /**
+     * Set the LockedContents flag. If set, do not allow the contents of the annotation to be
+     * modified by the user. This flag does not restrict deletion of the annotation or changes to
+     * other annotation properties, such as position and size.
+     *
+     * @param lockedContents The new LockedContents flag value.
+     * @see
+     * <a href="https://www.adobe.com/content/dam/acom/en/devnet/acrobat/pdfs/PDF32000_2008.pdf#page=393">PDF
+     * 32000-1:2008 12.5.3, Table 165</a>
+     * @see #isLockedContents()
+     * @see #FLAG_LOCKED_CONTENTS
+     * @since PDF 1.7
+     */
+    public void setLockedContents(boolean lockedContents)
+    {
+        getCOSObject().setFlag(COSName.F, FLAG_LOCKED_CONTENTS, lockedContents);
+    }
+
+    /**
      * Get the "contents" of the field.
      *
      * @return the value of the contents.
@@ -529,7 +592,7 @@ public abstract class PDAnnotation implements COSObjectable
     /**
      * This will retrieve the date and time the annotation was modified.
      *
-     * @return the modified date/time (often in date format, but can be an arbitary string).
+     * @return the modified date/time (often in date format, but can be an arbitrary string).
      */
     public String getModifiedDate()
     {

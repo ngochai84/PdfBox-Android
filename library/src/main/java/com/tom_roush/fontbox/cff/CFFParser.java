@@ -407,7 +407,14 @@ public class CFFParser
         {
             return 0d;
         }
-        return Double.valueOf(sb.toString());
+        try
+        {
+            return Double.valueOf(sb.toString());
+        }
+        catch (NumberFormatException ex)
+        {
+            throw new IOException(ex);
+        }
     }
 
     private CFFFont parseFont(CFFDataInput input, String name, byte[] topDictIndex) throws IOException
@@ -416,7 +423,7 @@ public class CFFParser
         CFFDataInput topDictInput = new CFFDataInput(topDictIndex);
         DictData topDict = readDictData(topDictInput);
 
-        // we dont't support synthetic fonts
+        // we don't support synthetic fonts
         DictData.Entry syntheticBaseEntry = topDict.getEntry("SyntheticBase");
         if (syntheticBaseEntry != null)
         {
@@ -735,7 +742,7 @@ public class CFFParser
         }
     }
 
-    private String readString(int index) throws IOException
+    private String readString(int index)
     {
         if (index >= 0 && index <= 390)
         {
@@ -752,7 +759,7 @@ public class CFFParser
         }
     }
 
-    private String getString(DictData dict, String name) throws IOException
+    private String getString(DictData dict, String name)
     {
         DictData.Entry entry = dict.getEntry(name);
         return entry != null ? readString(entry.getNumber(0).intValue()) : null;

@@ -31,10 +31,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.ref.SoftReference;
+import java.util.Arrays;
 import java.util.List;
 
 import com.tom_roush.pdfbox.cos.COSArray;
 import com.tom_roush.pdfbox.cos.COSBase;
+import com.tom_roush.pdfbox.cos.COSDictionary;
 import com.tom_roush.pdfbox.cos.COSInputStream;
 import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.cos.COSObject;
@@ -46,6 +48,7 @@ import com.tom_roush.pdfbox.pdmodel.PDDocument;
 import com.tom_roush.pdfbox.pdmodel.PDResources;
 import com.tom_roush.pdfbox.pdmodel.common.PDMetadata;
 import com.tom_roush.pdfbox.pdmodel.common.PDStream;
+import com.tom_roush.pdfbox.pdmodel.documentinterchange.markedcontent.PDPropertyList;
 import com.tom_roush.pdfbox.pdmodel.graphics.PDXObject;
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDColorSpace;
 import com.tom_roush.pdfbox.pdmodel.graphics.color.PDDeviceGray;
@@ -126,15 +129,33 @@ public final class PDImageXObject extends PDXObject implements PDImage
         super(stream, COSName.IMAGE);
         this.resources = resources;
         List<COSName> filters = stream.getFilters();
+        // JPX would be decode twice in rending. here is no need. just to ensure no parameters is missing.
         if (filters != null && !filters.isEmpty() && COSName.JPX_DECODE.equals(filters.get(filters.size()-1)))
         {
+            // skip decode jpx is no parameters is missing. see PDFBOX-5375 PDFBOX-3340
+            List<COSName> requireKeys = Arrays.asList(COSName.WIDTH, COSName.HEIGHT, COSName.COLORSPACE);
+            boolean needDecode = false;
+            COSStream cos = stream.getCOSObject();
+            for (COSName k : requireKeys)
+            {
+                if (!cos.containsKey(k))
+                {
+                    needDecode = true;
+                    break;
+                }
+            }
+            if (!needDecode)
+            {
+                return;
+            }
             COSInputStream is = null;
             try
             {
                 is = stream.createInputStream();
                 DecodeResult decodeResult = is.getDecodeResult();
                 stream.getCOSObject().addAll(decodeResult.getParameters());
-//                this.colorSpace = decodeResult.getJPXColorSpace(); TODO: PdfBox-Android
+                // getJPXColorSpace would be null in most cases
+                this.colorSpace = decodeResult.getJPXColorSpace();
             }
             finally
             {
@@ -196,11 +217,17 @@ public final class PDImageXObject extends PDXObject implements PDImage
 
     /**
      * Create a PDImageXObject from an image file. The file format is determined by the file name
-     * suffix. The following suffixes are supported: jpg, jpeg, tif, tiff, gif, bmp and png. This is
+     * suffix. The following suffixes are supported: JPG, JPEG, TIF, TIFF, GIF, BMP and PNG. This is
      * a convenience method that calls {@link JPEGFactory#createFromStream},
      * {@link CCITTFactory#createFromFile} or {@link BitmapFactory#decodeFile} combined with
      * {@link LosslessFactory#createFromImage}. (The later can also be used to create a
-     * PDImageXObject from a Bitmap).
+     * PDImageXObject from a Bitmap). Starting with 2.0.18, this call will create an image
+     * directly from a PNG file without decoding it (when possible), which is faster. However the
+     * result size depends on the compression skill of the software that created the PNG file. If
+     * file size or bandwidth are important to you or to your clients, then create your PNG files
+     * with a tool that has implemented the
+     * <a href="https://blog.codinghorror.com/zopfli-optimization-literally-free-bandwidth/">Zopfli
+     * algorithm</a>, or use the two-step process mentioned above.
      *
      * @param file the image file.
      * @param doc the document that shall use this PDImageXObject.
@@ -220,10 +247,16 @@ public final class PDImageXObject extends PDXObject implements PDImage
         String ext = name.substring(dot + 1).toLowerCase();
         if ("jpg".equals(ext) || "jpeg".equals(ext))
         {
-            FileInputStream fis = new FileInputStream(file);
-            PDImageXObject imageXObject = JPEGFactory.createFromStream(doc, fis);
-            fis.close();
-            return imageXObject;
+            FileInputStream fis = null;
+            try
+            {
+                fis = new FileInputStream(file);
+                return JPEGFactory.createFromStream(doc, fis);
+            }
+            finally
+            {
+                IOUtils.closeQuietly(fis);
+            }
         }
         if ("tif".equals(ext) || "tiff".equals(ext))
         {
@@ -239,11 +272,17 @@ public final class PDImageXObject extends PDXObject implements PDImage
 
     /**
      * Create a PDImageXObject from an image file. The file format is determined by the file
-     * content. The following file types are supported: jpg, jpeg, tif, tiff, gif, bmp and png. This
+     * content. The following file types are supported: JPG, JPEG, TIF, TIFF, GIF, BMP and PNG. This
      * is a convenience method that calls {@link JPEGFactory#createFromStream},
      * {@link CCITTFactory#createFromFile} or {@link BitmapFactory#decodeFile} combined with
      * {@link LosslessFactory#createFromImage}. (The later can also be used to create a
-     * PDImageXObject from a Bitmap).
+     * PDImageXObject from a Bitmap). Starting with 2.0.18, this call will create an image
+     * directly from a png file without decoding it (when possible), which is faster. However the
+     * result size depends on the compression skill of the software that created the PNG file. If
+     * file size or bandwidth are important to you or to your clients, then create your PNG files
+     * with a tool that has implemented the
+     * <a href="https://blog.codinghorror.com/zopfli-optimization-literally-free-bandwidth/">Zopfli
+     * algorithm</a>, or use the two-step process mentioned above.
      *
      * @param file the image file.
      * @param doc the document that shall use this PDImageXObject.
@@ -309,11 +348,17 @@ public final class PDImageXObject extends PDXObject implements PDImage
 
     /**
      * Create a PDImageXObject from bytes of an image file. The file format is determined by the
-     * file content. The following file types are supported: jpg, jpeg, tif, tiff, gif, bmp and png.
+     * file content. The following file types are supported: JPG, JPEG, TIF, TIFF, GIF, BMP and PNG.
      * This is a convenience method that calls {@link JPEGFactory#createFromByteArray},
      * {@link CCITTFactory#createFromFile} or {@link BitmapFactory#decodeFile} combined with
      * {@link LosslessFactory#createFromImage}. (The later can also be used to create a
-     * PDImageXObject from a Bitmap).
+     * PDImageXObject from a Bitmap). Starting with 2.0.18, this call will create an image
+     * directly from a PNG file without decoding it (when possible), which is faster. However the
+     * result size depends on the compression skill of the software that created the PNG file. If
+     * file size or bandwidth are important to you or to your clients, then create your PNG files
+     * with a tool that has implemented the
+     * <a href="https://blog.codinghorror.com/zopfli-optimization-literally-free-bandwidth/">Zopfli
+     * algorithm</a>, or use the two-step process mentioned above.
      *
      * @param byteArray bytes from an image file.
      * @param document the document that shall use this PDImageXObject.
@@ -343,6 +388,7 @@ public final class PDImageXObject extends PDXObject implements PDImage
         {
             return JPEGFactory.createFromByteArray(document, byteArray);
         }
+//        if (fileType.equals(FileType.PNG)) TODO: PdfBox-Android
         if (fileType.equals(FileType.TIFF))
         {
             try
@@ -465,6 +511,13 @@ public final class PDImageXObject extends PDXObject implements PDImage
         return image;
     }
 
+    /**
+     * Extract the matte color from a softmask.
+     *
+     * @param softMask
+     * @return the matte color.
+     * @throws IOException if the color conversion fails.
+     */
     private float[] extractMatte(PDImageXObject softMask) throws IOException
     {
         COSBase base = softMask.getCOSObject().getItem(COSName.MATTE);
@@ -509,7 +562,6 @@ public final class PDImageXObject extends PDXObject implements PDImage
     // soft mask: RGB + Gray -> ARGB
     private Bitmap applyMask(Bitmap image, Bitmap mask,
         boolean isSoft, float[] matte)
-        throws IOException
     {
         if (mask == null)
         {
@@ -533,39 +585,42 @@ public final class PDImageXObject extends PDXObject implements PDImage
 
         // compose to ARGB
         Bitmap masked = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        int[] outPixels = new int[width];
 
         int rgb;
-        int rgba;
         int alphaPixel;
         int alpha;
+        int[] imgPixels = new int[width];
+        int[] maskPixels = new int[width];
         for (int y = 0; y < height; y++)
         {
+            image.getPixels(imgPixels, 0, width, 0, y, width, 1);
+            mask.getPixels(maskPixels, 0, width, 0, y, width, 1);
             for (int x = 0; x < width; x++)
             {
-                rgb = image.getPixel(x, y);
-
-                alphaPixel = mask.getPixel(x, y);
+                rgb = imgPixels[x];
+                int r = Color.red(rgb);
+                int g = Color.green(rgb);
+                int b = Color.blue(rgb);
+                alphaPixel = maskPixels[x];
                 if (isSoft)
                 {
                     alpha = Color.alpha(alphaPixel);
-                    if (matte != null && Float.compare(alphaPixel, 0) != 0)
+                    if (matte != null && Float.compare(alpha, 0) != 0)
                     {
-                        rgb = Color.rgb(
-                            clampColor(((Color.red(rgb) / 255 - matte[0]) / (alphaPixel / 255) + matte[0]) * 255),
-                            clampColor(((Color.green(rgb) / 255 - matte[1]) / (alphaPixel / 255) + matte[1]) * 255),
-                            clampColor(((Color.blue(rgb) / 255 - matte[2]) / (alphaPixel / 255) + matte[2]) * 255)
-                        );
+                        r = clampColor(((r / 255F - matte[0]) / (alpha / 255F) + matte[0]) * 255);
+                        g = clampColor(((g / 255F - matte[1]) / (alpha / 255F) + matte[1]) * 255);
+                        b = clampColor(((b / 255F - matte[2]) / (alpha / 255F) + matte[2]) * 255);
                     }
                 }
                 else
                 {
                     alpha = 255 - Color.alpha(alphaPixel);
                 }
-                rgba = Color.argb(alpha, Color.red(rgb), Color.green(rgb),
-                    Color.blue(rgb));
 
-                masked.setPixel(x, y, rgba);
+                outPixels[x] = Color.argb(alpha, r, g, b);
             }
+            masked.setPixels(outPixels, 0, width, 0, y, width, 1);
         }
 
         return masked;
@@ -727,6 +782,8 @@ public final class PDImageXObject extends PDXObject implements PDImage
     public void setColorSpace(PDColorSpace cs)
     {
         getCOSObject().setItem(COSName.COLORSPACE, cs != null ? cs.getCOSObject() : null);
+        colorSpace = null;
+        cachedImage = null;
     }
 
     @Override
@@ -834,5 +891,31 @@ public final class PDImageXObject extends PDXObject implements PDImage
             Log.w("PdfBox-Android", "getSuffix() returns null, filters: " + filters);
             return null;
         }
+    }
+
+    /**
+     * This will get the optional content group or optional content membership dictionary.
+     *
+     * @return The optional content group or optional content membership dictionary or null if there
+     * is none.
+     */
+    public PDPropertyList getOptionalContent()
+    {
+        COSBase base = getCOSObject().getDictionaryObject(COSName.OC);
+        if (base instanceof COSDictionary)
+        {
+            return PDPropertyList.create((COSDictionary) base);
+        }
+        return null;
+    }
+
+    /**
+     * Sets the optional content group or optional content membership dictionary.
+     *
+     * @param oc The optional content group or optional content membership dictionary.
+     */
+    public void setOptionalContent(PDPropertyList oc)
+    {
+        getCOSObject().setItem(COSName.OC, oc);
     }
 }
