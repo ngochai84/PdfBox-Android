@@ -17,18 +17,24 @@ android {
         }
     }
 
-    lintOptions {
-        abortOnError false
-    }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    lint {
+        abortOnError false
+    }
+    namespace 'com.tom_roush.pdfbox.sample'
 }
 
 dependencies {
     implementation project(':library')
 //    implementation "com.tom-roush:pdfbox-android:${project.VERSION_NAME}"
-    implementation 'androidx.appcompat:appcompat:1.4.1'
+    implementation 'androidx.appcompat:appcompat:1.4.2'
+
+    // Optional dependencies
+
+    // Read JPX images
+    implementation 'com.gemalto.jp2:jp2-android:1.0.3'
 }
