@@ -228,6 +228,10 @@ final class SampledImageReader
         }
     }
 
+//    public static WritableRaster getRawRaster(PDImage pdImage) throws IOException TODO: PdfBox-Android
+
+//    private static void readRasterFromAny(PDImage pdImage, WritableRaster raster) TODO: PdfBox-Android
+
     private static Bitmap from1Bit(PDImage pdImage, Rect clipped, final int subsampling,
         final int width, final int height) throws IOException
     {
@@ -299,7 +303,7 @@ final class SampledImageReader
             for (int y = 0; y < starty + scanHeight; y++)
             {
                 int x = 0;
-                int readLen = iis.read(buff);
+                int readLen = (int) IOUtils.populateBuffer(iis, buff);
                 if (y < starty || y % currentSubsampling > 0)
                 {
                     continue;
@@ -390,7 +394,7 @@ final class SampledImageReader
             int i = 0;
             for (int y = 0; y < starty + scanHeight; ++y)
             {
-                input.read(tempBytes);
+                IOUtils.populateBuffer(input, tempBytes);
                 if (y < starty || y % currentSubsampling > 0)
                 {
                     continue;

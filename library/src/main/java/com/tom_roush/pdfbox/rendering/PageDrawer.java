@@ -137,6 +137,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     private int nestedHiddenOCGCount;
 
     private final RenderDestination destination;
+    private final float imageDownscalingOptimizationThreshold;
 
     static final int JAVA_VERSION = PageDrawer.getJavaVersion();
 
@@ -164,6 +165,8 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         this.renderer = parameters.getRenderer();
         this.subsamplingAllowed = parameters.isSubsamplingAllowed();
         this.destination = parameters.getDestination();
+        this.imageDownscalingOptimizationThreshold =
+            parameters.getImageDownscalingOptimizationThreshold();
     }
 
     /**
@@ -345,7 +348,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     }
 
     @Override
-    protected void showFontGlyph(Matrix textRenderingMatrix, PDFont font, int code, String unicode,
+    protected void showFontGlyph(Matrix textRenderingMatrix, PDFont font, int code,
         Vector displacement) throws IOException
     {
         AffineTransform at = textRenderingMatrix.createAffineTransform();
@@ -428,13 +431,13 @@ public class PageDrawer extends PDFGraphicsStreamEngine
 
     @Override
     protected void showType3Glyph(Matrix textRenderingMatrix, PDType3Font font, int code,
-        String unicode, Vector displacement) throws IOException
+        Vector displacement) throws IOException
     {
         PDGraphicsState state = getGraphicsState();
         RenderingMode renderingMode = state.getTextState().getRenderingMode();
         if (!RenderingMode.NEITHER.equals(renderingMode))
         {
-            super.showType3Glyph(textRenderingMatrix, font, code, unicode, displacement);
+            super.showType3Glyph(textRenderingMatrix, font, code, displacement);
         }
     }
 
@@ -577,6 +580,13 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         paint.setStrokeWidth(lineWidth);
         paint.setStrokeCap(state.getLineCap());
         paint.setStrokeJoin(state.getLineJoin());
+        float miterLimit = state.getMiterLimit();
+        if (miterLimit < 1)
+        {
+            Log.w("PdfBox-Android", "Miter limit must be >= 1, value " + miterLimit + " is ignored");
+            miterLimit = 10;
+        }
+        paint.setStrokeMiter(miterLimit);
         if (dashArray != null)
         {
             paint.setPathEffect(new DashPathEffect(dashArray, phaseStart));
@@ -741,17 +751,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
     @Override
     public void endPath()
     {
-//        if (clipWindingRule != null)
-//        {
-//            linePath.setFillType(clipWindingRule);
-//            getGraphicsState().intersectClippingPath(linePath);
-//
-//            // PDFBOX-3836: lastClip needs to be reset, because after intersection it is still the same
-//            // object, thus setClip() would believe that it is cached.
-//            lastClip = null;
-//
-//            clipWindingRule = null;
-//        } TODO: PdfBox-Android causes rendering issues
+//        TODO: PdfBox-Android adding clipping causes rendering issues
         linePath.reset();
     }
 
@@ -763,16 +763,21 @@ public class PageDrawer extends PDFGraphicsStreamEngine
         {
             return;
         }
+        if (!isContentRendered())
+        {
+            return;
+        }
         Matrix ctm = getGraphicsState().getCurrentTransformationMatrix();
         AffineTransform at = ctm.createAffineTransform();
 
         if (!pdImage.getInterpolate())
         {
-            boolean isScaledUp = pdImage.getWidth() < Math.round(at.getScaleX()) ||
-                pdImage.getHeight() < Math.round(at.getScaleY());
-
             // if the image is scaled down, we use smooth interpolation, eg PDFBOX-2364
             // only when scaled up do we use nearest neighbour, eg PDFBOX-2302 / mori-cvpr01.pdf
+            // PDFBOX-4930: we use the sizes of the ARGB image. These can be different
+            // than the original sizes of the base image, when the mask is bigger.
+            boolean isScaledUp = pdImage.getImage().getWidth() < Math.round(at.getScaleX()) ||
+                pdImage.getImage().getHeight() < Math.round(at.getScaleY());
             if (isScaledUp)
             {
 //                graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
@@ -846,21 +851,16 @@ public class PageDrawer extends PDFGraphicsStreamEngine
 //        graphics.setComposite(getGraphicsState().getNonStrokingJavaComposite());
         setClip();
         AffineTransform imageTransform = new AffineTransform(at);
+        int width = image.getWidth();
+        int height = image.getHeight();
+        imageTransform.scale(1.0 / width, -1.0 / height);
+        imageTransform.translate(0, -height);
+
         PDSoftMask softMask = getGraphicsState().getSoftMask();
         if( softMask != null )
         {
-            imageTransform.scale(1, -1);
-            imageTransform.translate(0, -1);
-//            Paint awtPaint = new TexturePaint(image,
-//                new Rectangle2D.Double(imageTransform.getTranslateX(), imageTransform.getTranslateY(),
-//                    imageTransform.getScaleX(), imageTransform.getScaleY()));
-//            awtPaint = applySoftMaskToPaint(awtPaint, softMask);
-//            graphics.setPaint(awtPaint);
-            RectF unitRect = new RectF(0, 0, 1, 1);
-            if (isContentRendered())
-            {
-//            graphics.fill(at.createTransformedShape(unitRect));
-            }
+            RectF rectangle = new RectF(0, 0, width, height);
+//            Paint awtPaint; TODO: PdfBox-Android
         }
         else
         {
@@ -870,14 +870,7 @@ public class PageDrawer extends PDFGraphicsStreamEngine
                 image = applyTransferFunction(image, transfer);
             }
 
-            int width = image.getWidth();
-            int height = image.getHeight();
-            imageTransform.scale(1.0 / width, -1.0 / height);
-            imageTransform.translate(0, -height);
-            if (isContentRendered())
-            {
-                canvas.drawBitmap(image, imageTransform.toMatrix(), paint);
-            }
+            canvas.drawBitmap(image, imageTransform.toMatrix(), paint);
         }
     }
 
@@ -1520,17 +1513,19 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             visibles.add(!isHiddenOCG(prop));
         }
         COSName visibilityPolicy = ocmd.getVisibilityPolicy();
+        // visible if any of the entries in OCGs are OFF
         if (COSName.ANY_OFF.equals(visibilityPolicy))
         {
             for (boolean visible : visibles)
             {
                 if (!visible)
                 {
-                    return true;
+                    return false;
                 }
             }
-            return false;
+            return true;
         }
+        // visible only if all of the entries in OCGs are ON
         if (COSName.ALL_ON.equals(visibilityPolicy))
         {
             for (boolean visible : visibles)
@@ -1542,17 +1537,19 @@ public class PageDrawer extends PDFGraphicsStreamEngine
             }
             return false;
         }
+        // visible only if all of the entries in OCGs are OFF
         if (COSName.ALL_OFF.equals(visibilityPolicy))
         {
             for (boolean visible : visibles)
             {
                 if (visible)
                 {
-                    return false;
+                    return true;
                 }
             }
-            return true;
+            return false;
         }
+        // visible if any of the entries in OCGs are ON
         // AnyOn is default
         for (boolean visible : visibles)
         {

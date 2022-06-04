@@ -51,16 +51,22 @@ class PlainText
      */
     PlainText(String textValue)
     {
-        List<String> parts = Arrays.asList(textValue.replaceAll("\t", " ").split("\\r\\n|\\n|\\r|\\u2028|\\u2029"));
         paragraphs = new ArrayList<Paragraph>();
-        for (String part : parts)
+        if (textValue.isEmpty()) {
+            paragraphs.add(new Paragraph(""));
+        }
+        else
         {
-            // Acrobat prints a space for an empty paragraph
-            if (part.length() == 0)
+            List<String> parts = Arrays.asList(textValue.replaceAll("\t", " ").split("\\r\\n|\\n|\\r|\\u2028|\\u2029"));
+            for (String part : parts)
             {
-                part = " ";
+                // Acrobat prints a space for an empty paragraph
+                if (part.length() == 0)
+                {
+                    part = " ";
+                }
+                paragraphs.add(new Paragraph(part));
             }
-            paragraphs.add(new Paragraph(part));
         }
     }
 
@@ -173,6 +179,9 @@ class PlainText
                 String word = textContent.substring(start,end);
                 float wordWidth = font.getStringWidth(word) * scale;
 
+                boolean wordNeedsSplit = false;
+                int splitOffset = end - start;
+
                 lineWidth = lineWidth + wordWidth;
 
                 // check if the last word would fit without the whitespace ending it
@@ -182,7 +191,7 @@ class PlainText
                     lineWidth = lineWidth - whitespaceWidth;
                 }
 
-                if (lineWidth >= width)
+                if (lineWidth >= width && !textLine.getWords().isEmpty())
                 {
                     textLine.setWidth(textLine.calculateWidth(font, fontSize));
                     textLines.add(textLine);
@@ -190,13 +199,40 @@ class PlainText
                     lineWidth = font.getStringWidth(word) * scale;
                 }
 
+                if (wordWidth > width && textLine.getWords().isEmpty())
+                {
+                    // single word does not fit into width
+                    wordNeedsSplit = true;
+                    while (true)
+                    {
+                        splitOffset--;
+                        String substring = word.substring(0, splitOffset);
+                        float substringWidth = font.getStringWidth(substring) * scale;
+                        if (substringWidth < width)
+                        {
+                            word = substring;
+                            wordWidth = font.getStringWidth(word) * scale;
+                            lineWidth = wordWidth;
+                            break;
+                        }
+                    }
+                }
+
                 AttributedString as = new AttributedString(word);
                 as.addAttribute(TextAttribute.WIDTH, wordWidth);
                 Word wordInstance = new Word(word);
                 wordInstance.setAttributes(as);
                 textLine.addWord(wordInstance);
-                start = end;
-                end = iterator.next();
+
+                if (wordNeedsSplit)
+                {
+                    start = start + splitOffset;
+                }
+                else
+                {
+                    start = end;
+                    end = iterator.next();
+                }
             }
             textLine.setWidth(textLine.calculateWidth(font, fontSize));
             textLines.add(textLine);

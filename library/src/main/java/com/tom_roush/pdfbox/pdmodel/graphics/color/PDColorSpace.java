@@ -23,6 +23,7 @@ import java.io.IOException;
 
 import com.tom_roush.pdfbox.cos.COSArray;
 import com.tom_roush.pdfbox.cos.COSBase;
+import com.tom_roush.pdfbox.cos.COSDictionary;
 import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.cos.COSObject;
 import com.tom_roush.pdfbox.pdmodel.MissingResourceException;
@@ -234,6 +235,12 @@ public abstract class PDColorSpace implements COSObjectable
                 throw new IOException("Invalid color space kind: " + name);
             }
         }
+        else if (colorSpace instanceof COSDictionary &&
+            ((COSDictionary) colorSpace).containsKey(COSName.COLORSPACE))
+        {
+            // PDFBOX-4833: dictionary with /ColorSpace entry
+            return create(((COSDictionary) colorSpace).getDictionaryObject(COSName.COLORSPACE), resources, wasDefault);
+        }
         else
         {
             throw new IOException("Expected a name or array but got: " + colorSpace);
@@ -305,6 +312,10 @@ public abstract class PDColorSpace implements COSObjectable
      * @throws IOException if the color conversion fails
      */
     public abstract Bitmap toRGBImage(Bitmap raster) throws IOException;
+
+//    public abstract BufferedImage toRawImage(WritableRaster raster) throws IOException; TODO: PdfBox-Android
+
+//    protected final BufferedImage toRawImage(WritableRaster raster, ColorSpace awtColorSpace) TODO: PdfBox-Android
 
 //    protected BufferedImage toRGBImageAWT(WritableRaster raster, ColorSpace colorSpace) TODO: PdfBox-Android
 
