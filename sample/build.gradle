@@ -1,9 +1,8 @@
 apply plugin: 'com.android.application'
 
 android {
-    compileSdkVersion Integer.parseInt(project.ANDROID_BUILD_SDK_VERSION)
-
     defaultConfig {
+        compileSdk Integer.parseInt(project.ANDROID_BUILD_SDK_VERSION)
         applicationId 'com.tom_roush.pdfbox.sample'
         minSdkVersion 27
         targetSdkVersion Integer.parseInt(project.ANDROID_BUILD_TARGET_SDK_VERSION)
