@@ -3,12 +3,13 @@ defaultTasks 'clean','build','connectedCheck'
 
 buildscript {
     repositories {
+        gradlePluginPortal()
         mavenCentral()
         google()
-        jcenter() // jp2-android
+        maven { url 'https://jcenter.bintray.com' }
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.4.2'
+        classpath 'com.android.tools.build:gradle:8.1.4'
     }
 }
 
@@ -18,9 +19,11 @@ allprojects {
     repositories {
 //        Enable downloading snapshot versions
 //        maven { url "https://s01.oss.sonatype.org/content/repositories/snapshots/" }
+        gradlePluginPortal()
         mavenCentral()
         google()
-        jcenter()
+        maven { url 'https://jcenter.bintray.com' }
+//        jcenter()
     }
 
 //    Show more warnings if desired
