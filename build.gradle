@@ -19,10 +19,9 @@ allprojects {
     repositories {
 //        Enable downloading snapshot versions
 //        maven { url "https://s01.oss.sonatype.org/content/repositories/snapshots/" }
-        gradlePluginPortal()
-        mavenCentral()
-        google()
-        maven { url 'https://jcenter.bintray.com' }
+//        gradlePluginPortal()
+//        mavenCentral()
+//        google()
 //        jcenter()
     }
 
