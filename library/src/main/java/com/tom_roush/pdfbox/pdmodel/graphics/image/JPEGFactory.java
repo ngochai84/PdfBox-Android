@@ -64,6 +64,28 @@ public final class JPEGFactory
         return createFromByteArray(document, IOUtils.toByteArray(stream));
     }
 
+
+    public static PDImageXObject createFromStream(PDDocument document, InputStream stream, int width, int height)
+            throws IOException {
+        // copy stream
+//        if (decode) {
+//            ByteArrayInputStream byteStream = new ByteArrayInputStream(IOUtils.toByteArray(stream));
+
+        BitmapFactory.Options options = new BitmapFactory.Options();
+//            options.inJustDecodeBounds = true;
+//
+//            BitmapFactory.decodeStream(stream, null, options);
+
+
+        PDImageXObject pdImage = new PDImageXObject(
+                document, stream,
+                COSName.DCT_DECODE, width, height,
+                8,
+                PDDeviceRGB.INSTANCE //getColorSpaceFromAWT(awtImage));
+        );
+        return pdImage;
+    }
+
     /**
      * Creates a new JPEG Image XObject from a byte array containing JPEG data.
      *
