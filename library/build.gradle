@@ -10,7 +10,6 @@ ext {
 
 android {
     compileOptions.encoding = 'UTF-8'
-
     defaultConfig {
         compileSdk Integer.parseInt(project.ANDROID_BUILD_SDK_VERSION)
         testInstrumentationRunnerArguments notAnnotation: 'androidx.test.filters.FlakyTest'
@@ -25,7 +24,6 @@ android {
             minifyEnabled false
         }
     }
-
 
     testOptions {
         unitTests.returnDefaultValues = true
