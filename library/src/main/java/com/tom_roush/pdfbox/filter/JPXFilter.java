@@ -26,8 +26,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-import com.gemalto.jp2.JP2Decoder;
-import com.gemalto.jp2.JP2Encoder;
+import com.gemalto.jp2.*;
 import com.tom_roush.pdfbox.cos.COSDictionary;
 import com.tom_roush.pdfbox.cos.COSName;
 import com.tom_roush.pdfbox.io.IOUtils;
